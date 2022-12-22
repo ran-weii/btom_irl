@@ -6,12 +6,12 @@ from gym import spaces
 
 class Gridworld(gym.Env):
     """ Fully observable gridworld environment """
-    def __init__(self, num_grids, init_pos=np.array([]), goal_pos=np.array([[0, 0], [2, 2]]), epsilon=0.):
+    def __init__(self, num_grids, init_pos=np.array([]), goal_pos=np.array([]), epsilon=0.):
         """
         Args:
             num_grids (int): number of grids per side
-            init_post (np.array): initial state positions. size=[n, 2]
-            goal_post (np.array): goal state positions. size=[n, 2]
+            init_post (np.array): initial state positions. default is uniform except goal states. size=[n, 2]
+            goal_post (np.array): goal state positions. default is upper right. size=[n, 2]
             epsilon (float): transition error. Default=0.
         """
         assert epsilon < 1.
@@ -28,6 +28,8 @@ class Gridworld(gym.Env):
         self.state2pos = np.array(state2pos).reshape(self.state_dim, -1).astype(int)
 
         # target distribution
+        if len(goal_pos) == 0:
+            goal_pos = np.array([[num_grids - 1, num_grids - 1]])
         self.goal_states = np.stack([self.pos2state(p) for p in goal_pos])
 
         self.target_dist = np.zeros(self.state_dim)
