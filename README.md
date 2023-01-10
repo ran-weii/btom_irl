@@ -1,4 +1,4 @@
-# Bayesian theory of mind for inverse reinforcement learning
+# Robust inverse reinforcement learning through Bayesian theory of mind (work in progress)
 Compare covariate shift mitigation in the following algorithms:
 * Model-based inverse reinforcement learning
 * Pessimistic imitation learning
