@@ -5,14 +5,25 @@ import gym
 from gym import spaces
 
 class Gridworld(gym.Env):
-    """ Fully observable gridworld environment """
-    def __init__(self, num_grids, init_pos=np.array([]), goal_pos=np.array([]), epsilon=0.):
+    """ Fully observable gridworld environment with state based reward """
+    def __init__(
+        self, 
+        num_grids, 
+        init_pos=np.array([]), 
+        goal_pos=np.array([]), 
+        epsilon=0.,
+        init_dist=None,
+        target_dist=None,
+        transition_matrix=None):
         """
         Args:
             num_grids (int): number of grids per side
             init_post (np.array): initial state positions. default is uniform except goal states. size=[n, 2]
             goal_post (np.array): goal state positions. default is upper right. size=[n, 2]
             epsilon (float): transition error. Default=0.
+            init_dist (torch.tensor): initial state distribution. size=[state_dim]
+            target_dist (torch.tensor): target state distribution. size=[state_dim]
+            transition_matrix (torch.tensor): transition matrix. size=[act_dim, state_dim, state_dim]
         """
         assert epsilon < 1.
         self.num_grids = num_grids
@@ -34,6 +45,11 @@ class Gridworld(gym.Env):
 
         self.target_dist = np.zeros(self.state_dim)
         self.target_dist[self.goal_states] = 1./len(self.goal_states)
+
+        if target_dist is not None: # init target_dist from input
+            assert isinstance(target_dist, np.ndarray)
+            assert list(target_dist.shape) == [self.state_dim]
+            self.target_dist = target_dist
         self.reward_matrix = np.log(self.target_dist + 1e-6)
         
         # initial state distribution
@@ -46,7 +62,17 @@ class Gridworld(gym.Env):
         self.init_dist = np.zeros(self.state_dim)
         self.init_dist[self.init_states] = 1./len(self.init_states)
         
-        self.make_transition_matrix()
+        if init_dist is not None: # init init_dist from input
+            assert isinstance(init_dist, np.ndarray)
+            assert list(init_dist.shape) == [self.state_dim]
+            self.init_dist = init_dist
+        
+        if transition_matrix is not None: # init transition from input
+            assert isinstance(transition_matrix, np.ndarray)
+            assert list(transition_matrix.shape) == [self.act_dim, self.state_dim, self.state_dim]
+            self.transition_matrix = transition_matrix
+        else:
+            self.make_transition_matrix()
     
     def pos2state(self, pos):
         """ Map a single position to state 
@@ -55,15 +81,6 @@ class Gridworld(gym.Env):
             pos (torch.tensor): size=[n, 2]
         """
         return np.where(np.all(pos == self.state2pos, axis=1))[0]
-    
-    def value2map(self, v):
-        num_grids = self.num_grids
-
-        v_map = np.zeros((num_grids, num_grids))
-        for i in range(num_grids): # x pos
-            for j in range(num_grids): # y pos
-                v_map[j, i] = v[self.pos2state(np.array([i, j]))]
-        return v_map
 
     def make_transition_matrix(self):
         # pos [0, 0] is origin
@@ -133,7 +150,6 @@ if __name__ == "__main__":
     
     # test env
     env = Gridworld(num_grids, init_pos=init_pos, goal_pos=goal_pos, epsilon=epsilon)
-    init_dist_map = env.value2map(env.init_dist)
 
     obs = env.reset()
     next_obs, _, _, _ = env.step(1)
@@ -141,7 +157,6 @@ if __name__ == "__main__":
     assert env.init_dist.sum(-1) == 1
     assert env.target_dist.sum(-1) == 1
     assert np.all(env.transition_matrix.sum(-1) == 1)
-    assert list(init_dist_map.shape) == [num_grids, num_grids]
     print("gridworld env passed")
     
     # test vectorized env

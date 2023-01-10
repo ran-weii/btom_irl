@@ -26,7 +26,7 @@ class GridworldVis:
         Args:
             s_seq (np.array): batch of state sequences. size=[batch_size, T]
         """
-        sample_path = np.stack([env.state2pos[d] for d in s_seq]).astype(float)
+        sample_path = np.stack([self.env.state2pos[d] for d in s_seq]).astype(float)
         sample_path += np.random.normal(size=sample_path.shape) * 0.1
 
         ax.plot(sample_path[:, :, 0].T, sample_path[:, :, 1].T, "k-")
