@@ -2,3 +2,4 @@
 .DS_Store
 src.egg-info/*
 data/*
+exp/*
