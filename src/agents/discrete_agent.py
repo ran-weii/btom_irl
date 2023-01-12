@@ -49,8 +49,8 @@ class DiscreteAgent(nn.Module):
 
     def choose_action(self, s):
         if self.finite_horizon:
-            pi = self.pi[-1][s]
+            pi = self.pi[-1][s.long()]
         else:
-            pi = self.pi[s]
-        a = torch.multinomial(pi, 1)
-        return a.numpy().flatten()
+            pi = self.pi[s.long()]
+        a = torch.multinomial(pi, 1).squeeze(-1)
+        return a

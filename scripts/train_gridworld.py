@@ -7,8 +7,8 @@ import pickle
 import numpy as np
 import torch
 
-from src.agents.discrete_agents import DiscreteAgent
-from src.algo.btom import DiscreteBTOM
+from src.agents.discrete_agent import DiscreteAgent
+from src.algo.discrete_btom import DiscreteBTOM
 
 def parse_args():
     bool_ = lambda x: x if isinstance(x, bool) else x == "True"
@@ -94,8 +94,6 @@ def main(arglist):
         decay=arglist["decay"]
     )
     history = model.fit(data, arglist["epochs"])
-    
-    print(pd.DataFrame(history))
 
     # save model
     if arglist["save"]:

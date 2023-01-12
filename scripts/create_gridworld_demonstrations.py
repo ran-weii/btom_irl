@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from src.env.gridworld import Gridworld
-from src.agents.discrete_agents import DiscreteAgent
+from src.agents.discrete_agent import DiscreteAgent
 from src.algo.utils import rollout_parallel
 
 def parse_args():

@@ -131,6 +131,7 @@ class DiscreteBTOM(nn.Module):
         Args:
             dataset (dict[np.array]): dict with keys ["s", "a"]. size=[batch_size, seq_len]
         """
+        # unpack data
         s = torch.from_numpy(dataset["s"][:, :-1]).flatten()
         a = torch.from_numpy(dataset["a"]).flatten()
         s_next = torch.from_numpy(dataset["s"][:, 1:]).flatten()
@@ -155,7 +156,7 @@ class DiscreteBTOM(nn.Module):
                     pi_fake = pi[-1][s]
                 else:
                     pi_fake = pi[s]
-                a_fake = torch.from_numpy(self.agent.choose_action(s))
+                a_fake = self.agent.choose_action(s)
                 
                 if self.exact:
                     real_traj = self.compute_state_action_marginal(s, pi_data, pi, transition, self.rollout_steps)
