@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
-from src.agents.utils import (
-    finite_horizon_value_iteration, infinite_horizon_value_iteration)
+from src.agents.utils import value_iteration
 
 class DiscreteAgent(nn.Module):
     def __init__(self, state_dim, act_dim, gamma, alpha, horizon):
@@ -37,9 +36,16 @@ class DiscreteAgent(nn.Module):
             reward = self.reward().view(-1, 1).repeat_interleave(self.act_dim, -1)
         
         if self.finite_horizon:
-            q = finite_horizon_value_iteration(transition, reward, self.gamma, self.alpha, self.horizon)
+            q, _ = value_iteration(
+                transition, reward, self.gamma, self.alpha, 
+                finite_horizon=True, max_iter=self.horizon
+            )
         else:
-            q, _ = infinite_horizon_value_iteration(transition, reward, self.gamma, self.alpha)
+            q, _ = value_iteration(
+                transition, reward, self.gamma, self.alpha,
+                finite_horizon=False
+            )
+            q = q[-1]
         v = torch.logsumexp(self.alpha * q, dim=-1) / self.alpha
         pi = torch.softmax(self.alpha * q, dim=-1)
         

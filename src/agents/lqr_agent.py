@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.distributions as torch_dist
-from src.agents.utils import (
-    finite_horizon_riccati_equation, infinite_horizon_riccati_equation)
+from src.agents.utils import riccati_equation
 
 class LQRAgent(nn.Module):
     """ Linear quadratic control agent """
@@ -57,15 +56,17 @@ class LQRAgent(nn.Module):
         R = self.R()
         
         if self.finite_horizon:
-            Q_t, c_t = finite_horizon_riccati_equation(
+            Q_t, c_t, _ = riccati_equation(
                 A, B, I, Q, R, 
-                self.gamma, self.alpha, self.horizon
+                self.gamma, self.alpha, finite_horizon=True, max_iter=self.horizon
             )
         else:
-            Q_t, c_t, _ = infinite_horizon_riccati_equation(
+            Q_t, c_t, _ = riccati_equation(
                 A, B, I, Q, R, 
-                self.gamma, self.alpha
+                self.gamma, self.alpha, finite_horizon=False
             )
+            Q_t = Q_t[-1]
+            c_t = c_t[-1]
         
         self.Q_t = Q_t
         self.c_t = c_t

@@ -10,6 +10,8 @@ from src.agents.discrete_agent import DiscreteAgent
 from src.algo.utils import rollout_parallel
 
 def parse_args():
+    bool_ = lambda x: x if isinstance(x, bool) else x == "True"
+
     parser = argparse.ArgumentParser()
     # env args
     parser.add_argument("--num_grids", type=int, default=5, help="number of grids, default=5")
@@ -25,7 +27,7 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=0)
     # save args
     parser.add_argument("--save_path", type=str, default="../data")
-    parser.add_argument("--save", type=bool, default=True)
+    parser.add_argument("--save", type=bool_, default=True)
     arglist = parser.parse_args()
     return arglist
 

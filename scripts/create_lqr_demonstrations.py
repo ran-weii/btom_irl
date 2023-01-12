@@ -10,6 +10,8 @@ from src.agents.lqr_agent import LQRAgent
 from src.algo.utils import rollout_parallel
 
 def parse_args():
+    bool_ = lambda x: x if isinstance(x, bool) else x == "True"
+
     parser = argparse.ArgumentParser()
     # agent args
     parser.add_argument("--gamma", type=float, default=0.7, help="discount factor, default=0.7")
@@ -22,7 +24,7 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=0)
     # save args
     parser.add_argument("--save_path", type=str, default="../data")
-    parser.add_argument("--save", type=bool, default=True)
+    parser.add_argument("--save", type=bool_, default=True)
     arglist = parser.parse_args()
     return arglist
 
