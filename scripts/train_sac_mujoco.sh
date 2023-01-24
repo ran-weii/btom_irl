@@ -1,0 +1,26 @@
+#! /bin/bash
+python train_sac_mujoco.py \
+--cp_path "01-20-2023 14-57-32" \
+--hidden_dim 128 \
+--num_hidden 2 \
+--activation relu \
+--gamma 0.99 \
+--beta 0.2 \
+--polyak 0.995 \
+--norm_obs False \
+--buffer_size 1000000 \
+--batch_size 200 \
+--steps 50 \
+--lr 0.00 \
+--decay 1e-5 \
+--grad_clip 100. \
+--epochs 200 \
+--max_steps 1000 \
+--steps_per_epoch 4000 \
+--update_after 2000 \
+--update_every 50 \
+--cp_every 10 \
+--verbose True \
+--render True \
+--save False \
+--seed 0
