@@ -51,7 +51,6 @@ class SAC(nn.Module):
             hidden_dim (int): value network hidden dim
             num_hidden (int): value network hidden layers
             activation (str): value network activation
-            algo (str, optional): imitation algorithm. choices=[ail, nail]
             gamma (float, optional): discount factor. Default=0.9
             beta (float, optional): softmax temperature. Default=0.2
             polyak (float, optional): target network polyak averaging factor. Default=0.995
@@ -183,10 +182,9 @@ class SAC(nn.Module):
         a_loss = torch.mean(self.beta * logp - q)
         return a_loss
 
-    def take_gradient_step(self, rwd_fn=None, logger=None):
+    def take_policy_gradient_step(self, rwd_fn=None, logger=None):
         self.actor.train()
         self.critic.train()
-        self.update_normalization_stats()
         
         actor_loss_epoch = []
         critic_loss_epoch = []
@@ -265,7 +263,7 @@ class SAC(nn.Module):
         data["done"] = torch.from_numpy(np.stack(data["done"])).to(torch.float32)
         return data
 
-    def train_rl(
+    def train_policy(
         self, env, eval_env, max_steps, epochs, steps_per_epoch, update_after, update_every, 
         rwd_fn=None, num_eval_eps=0, callback=None, verbose=True
         ):
@@ -277,16 +275,20 @@ class SAC(nn.Module):
         epoch = 0
         obs, eps_return, eps_len = env.reset()[0], 0, 0
         for t in range(total_steps):
-            with torch.no_grad():
-                act = self.choose_action(
-                    torch.from_numpy(obs).view(1, -1).to(torch.float32)
-                ).numpy().flatten()
+            if (t + 1) < update_after:
+                act = torch.rand(self.act_dim).uniform_(-1, 1) * self.act_lim
+                act = act.data.numpy()
+            else:
+                with torch.no_grad():
+                    act = self.choose_action(
+                        torch.from_numpy(obs).view(1, -1).to(torch.float32)
+                    ).numpy().flatten()
             next_obs, reward, terminated, truncated, info = env.step(act)
             
             eps_return += reward
             eps_len += 1
             
-            self.replay_buffer(obs, act, next_obs, reward, terminated, truncated)
+            self.replay_buffer(obs, act, next_obs, reward, terminated)
             obs = next_obs
             
             # end of trajectory handeling
@@ -300,7 +302,8 @@ class SAC(nn.Module):
 
             # train model
             if (t + 1) > update_after and (t - update_after + 1) % update_every == 0:
-                train_stats = self.take_gradient_step(rwd_fn, logger)
+                self.update_normalization_stats()
+                train_stats = self.take_policy_gradient_step(rwd_fn, logger)
 
                 if verbose:
                     round_loss_dict = {k: round(v, 4) for k, v in train_stats.items()}

@@ -6,11 +6,9 @@ import mujoco_py
 import gymnasium as gym
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from tqdm import tqdm
 import torch 
 
-from src.agents.mceirl import MCEIRL
+from src.algo.mceirl import MCEIRL
 from src.agents.rl_utils import parse_stacked_trajectories
 from src.algo.logging_utils import SaveCallback
 

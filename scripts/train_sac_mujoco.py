@@ -1,13 +1,10 @@
 import argparse
 import os
 import glob
-import json
-import datetime
 import mujoco_py
 import gymnasium as gym
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import torch 
 
 from src.agents.sac import SAC
@@ -83,7 +80,7 @@ def main(arglist):
     # load checkpoint
     cp_history = None
     if arglist["cp_path"] != "none":
-        cp_path = os.path.join(arglist["exp_path"], "sac", arglist["cp_path"])
+        cp_path = os.path.join(arglist["exp_path"], arglist["cp_path"])
         
         # load state dict
         cp_model_path = glob.glob(os.path.join(cp_path, "models/*.pt"))
@@ -106,7 +103,7 @@ def main(arglist):
         callback = SaveCallback(arglist, plot_keys, cp_history=cp_history)
     
     # training loop
-    logger = agent.train_rl(
+    logger = agent.train_policy(
         env, eval_env, arglist["max_steps"], arglist["epochs"], arglist["steps_per_epoch"],
         arglist["update_after"], arglist["update_every"], rwd_fn=None, num_eval_eps=5,
         callback=callback, verbose=arglist["verbose"]
