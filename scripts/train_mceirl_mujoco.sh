@@ -1,0 +1,31 @@
+#! /bin/bash
+python train_mceirl_mujoco.py \
+--cp_path "none" \
+--hidden_dim 128 \
+--num_hidden 2 \
+--activation relu \
+--gamma 0.99 \
+--beta 0.2 \
+--polyak 0.995 \
+--norm_obs False \
+--buffer_size 100000 \
+--d_batch_size 10 \
+--a_batch_size 200 \
+--d_steps 3 \
+--a_steps 50 \
+--lr_d 0.0003 \
+--lr_a 0.001 \
+--decay 1e-5 \
+--grad_clip 100. \
+--epochs 200 \
+--rl_epochs 2 \
+--max_steps 1000 \
+--truncate False \
+--steps_per_epoch 1000 \
+--update_after 2000 \
+--update_every 50 \
+--cp_every 10 \
+--verbose True \
+--render False \
+--save True \
+--seed 0
