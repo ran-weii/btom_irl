@@ -51,7 +51,6 @@ class SAC(nn.Module):
             hidden_dim (int): value network hidden dim
             num_hidden (int): value network hidden layers
             activation (str): value network activation
-            algo (str, optional): imitation algorithm. choices=[ail, nail]
             gamma (float, optional): discount factor. Default=0.9
             beta (float, optional): softmax temperature. Default=0.2
             polyak (float, optional): target network polyak averaging factor. Default=0.995

@@ -80,7 +80,7 @@ def main(arglist):
     # load checkpoint
     cp_history = None
     if arglist["cp_path"] != "none":
-        cp_path = os.path.join(arglist["exp_path"], "sac", arglist["cp_path"])
+        cp_path = os.path.join(arglist["exp_path"], arglist["cp_path"])
         
         # load state dict
         cp_model_path = glob.glob(os.path.join(cp_path, "models/*.pt"))
