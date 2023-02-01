@@ -67,16 +67,18 @@ class DoubleQNetwork(nn.Module):
         )
         return s
 
-    def forward(self, o):
+    def forward(self, o, a):
         """ Compute q1 and q2 values
         
         Args:
             o (torch.tensor): observation. size=[batch_size, obs_dim]
+            a (torch.tensor): action. size=[batch_size, act_dim]
 
         Returns:
             q1 (torch.tensor): q1 value. size=[batch_size, 1]
             q2 (torch.tensor): q2 value. size=[batch_size, 1]
         """
-        q1 = self.q1(o)
-        q2 = self.q2(o)
+        oa = torch.cat([o, a], dim=-1)
+        q1 = self.q1(oa)
+        q2 = self.q2(oa)
         return q1, q2

@@ -1,3 +1,4 @@
+import time
 import numpy as np
 from copy import deepcopy
 import torch
@@ -8,7 +9,7 @@ import torch.distributions.transforms as torch_transform
 
 # model imports
 from src.agents.nn_models import MLP, DoubleQNetwork
-from src.agents.rl_utils import ReplayBuffer
+from src.agents.rl_utils import ReplayBuffer, Logger
 
 class TanhTransform(torch_transform.Transform):
     """ Adapted from Pytorch implementation with clipping """
@@ -46,6 +47,7 @@ class SAC(nn.Module):
         Args:
             obs_dim (int): observation dimension
             act_dim (int): action dimension
+            act_lim (torch.tensor): action limits
             hidden_dim (int): value network hidden dim
             num_hidden (int): value network hidden layers
             activation (str): value network activation
@@ -55,9 +57,8 @@ class SAC(nn.Module):
             polyak (float, optional): target network polyak averaging factor. Default=0.995
             norm_obs (bool, optional): whether to normalize observations. Default=False
             buffer_size (int, optional): replay buffer size. Default=1e6
-            batch_size (int, optional): discriminator and critic batch size. Default=100
-            d_steps (int, optional): discriminator update steps per training step. Default=50
-            a_steps (int, optional): actor critic update steps per training step. Default=50
+            batch_size (int, optional): actor and critic batch size. Default=100
+            steps (int, optional): actor critic update steps per training step. Default=50
             lr (float, optional): learning rate. Default=1e-3
             decay (float, optional): weight decay. Default=0.
             grad_clip (float, optional): gradient clipping. Default=None
@@ -83,39 +84,26 @@ class SAC(nn.Module):
             obs_dim, act_dim, hidden_dim, num_hidden, activation
         )
         self.critic_target = deepcopy(self.critic)
-        
-        self.tanh = TanhTransform(act_lim)
 
         # freeze target parameters
         for param in self.critic_target.parameters():
             param.requires_grad = False
-        
-        self.actor_optimizer = torch.optim.Adam(
-            self.actor.parameters(), lr=lr, weight_decay=decay
-        )
-        self.critic_optimizer = torch.optim.Adam(
-            self.critic.parameters(), lr=lr, weight_decay=decay
-        )
+
+        self.optimizers = {
+            "actor": torch.optim.Adam(
+                self.actor.parameters(), lr=lr, weight_decay=decay
+            ),
+            "critic": torch.optim.Adam(
+                self.critic.parameters(), lr=lr, weight_decay=decay
+            )
+        }
         
         self.replay_buffer = ReplayBuffer(obs_dim, act_dim, buffer_size)
 
         self.obs_mean = nn.Parameter(torch.zeros(obs_dim), requires_grad=False)
         self.obs_variance = nn.Parameter(torch.ones(obs_dim), requires_grad=False)
         
-        self.plot_keys = ["eps_return_avg", "eps_len_avg", "critic_loss_avg", "actor_loss_avg"]
-    
-    def __repr__(self):
-        s_critic = self.critic.__repr__()
-        s = "{}(gamma={}, beta={}, polyak={}, norm_obs={}, "\
-            "buffer_size={}, batch_size={}, steps={}, "\
-            "lr={}, decay={}, grad_clip={}, "\
-            "\n    critic={}\n)".format(
-            self.__class__.__name__, self.gamma, self.beta, 
-            self.polyak, self.norm_obs, self.replay_buffer.max_size, 
-            self.batch_size, self.steps, self.lr, self.decay, self.grad_clip,
-            s_critic
-        )
-        return s
+        self.plot_keys = ["eval_eps_return_avg", "eval_eps_len_avg", "critic_loss_avg", "actor_loss_avg"]
 
     def update_normalization_stats(self):
         if self.norm_obs:
@@ -149,15 +137,13 @@ class SAC(nn.Module):
             a, _ = self.sample_action(obs_norm)
         return a
 
-    def compute_critic_loss(self):
+    def compute_critic_loss(self, rwd_fn):
         batch = self.replay_buffer.sample(self.batch_size)
         
         obs = batch["obs"]
-        # absorb = batch["absorb"]
         act = batch["act"]
         r = batch["rwd"]
         next_obs = batch["next_obs"]
-        # next_absorb = batch["next_absorb"]
         done = batch["done"]
         
         # normalize observation
@@ -165,19 +151,19 @@ class SAC(nn.Module):
         next_obs_norm = self.normalize_obs(next_obs)
         
         with torch.no_grad():
+            if rwd_fn is not None:
+                r = rwd_fn(obs_norm, act)
+
             # sample next action
             next_act, logp = self.sample_action(next_obs_norm)
-            
-            critic_input = torch.cat([obs_norm, act], dim=-1)
-            critic_next_input = torch.cat([next_obs_norm, next_act], dim=-1)
 
             # compute value target
-            q1_next, q2_next = self.critic_target(critic_next_input)
+            q1_next, q2_next = self.critic_target(next_obs_norm, next_act)
             q_next = torch.min(q1_next, q2_next)
             v_next = q_next - self.beta * logp
             q_target = r + (1 - done) * self.gamma * v_next
         
-        q1, q2 = self.critic(critic_input)
+        q1, q2 = self.critic(obs_norm, act)
         q1_loss = torch.pow(q1 - q_target, 2).mean()
         q2_loss = torch.pow(q2 - q_target, 2).mean()
         q_loss = (q1_loss + q2_loss) / 2 
@@ -191,14 +177,13 @@ class SAC(nn.Module):
         
         act, logp = self.sample_action(obs_norm)
         
-        critic_input = torch.cat([obs_norm, act], dim=-1)
-        q1, q2 = self.critic(critic_input)
+        q1, q2 = self.critic(obs_norm, act)
         q = torch.min(q1, q2)
 
         a_loss = torch.mean(self.beta * logp - q)
         return a_loss
 
-    def take_gradient_step(self, logger=None):
+    def take_gradient_step(self, rwd_fn=None, logger=None):
         self.actor.train()
         self.critic.train()
         self.update_normalization_stats()
@@ -207,13 +192,13 @@ class SAC(nn.Module):
         critic_loss_epoch = []
         for i in range(self.steps):
             # train critic
-            critic_loss = self.compute_critic_loss()
+            critic_loss = self.compute_critic_loss(rwd_fn)
             critic_loss.backward()
             if self.grad_clip is not None:
                 nn.utils.clip_grad_norm_(self.critic.parameters(), self.grad_clip)
-            self.critic_optimizer.step()
-            self.critic_optimizer.zero_grad()
-            self.actor_optimizer.zero_grad()
+            self.optimizers["critic"].step()
+            self.optimizers["critic"].zero_grad()
+            self.optimizers["actor"].zero_grad()
             
             critic_loss_epoch.append(critic_loss.data.item())
 
@@ -222,9 +207,9 @@ class SAC(nn.Module):
             actor_loss.backward()
             if self.grad_clip is not None:
                 nn.utils.clip_grad_norm_(self.actor.parameters(), self.grad_clip)
-            self.actor_optimizer.step()
-            self.actor_optimizer.zero_grad()
-            self.critic_optimizer.zero_grad()
+            self.optimizers["actor"].step()
+            self.optimizers["actor"].zero_grad()
+            self.optimizers["critic"].zero_grad()
             
             actor_loss_epoch.append(actor_loss.data.item())
             
@@ -250,4 +235,97 @@ class SAC(nn.Module):
         self.actor.eval()
         self.critic.eval()
         return stats
+    
+    def rollout(self, env, max_steps):
+        obs = env.reset()[0]
+
+        data = {"obs": [], "act": [], "next_obs": [], "rwd": [], "done": []}
+        for t in range(max_steps):
+            with torch.no_grad():
+                act = self.choose_action(
+                    torch.from_numpy(obs).to(torch.float32)
+                ).numpy()
+            next_obs, rwd, terminated, _, _ = env.step(act)
+            
+            data["obs"].append(obs)
+            data["act"].append(act)
+            data["next_obs"].append(next_obs)
+            data["rwd"].append(rwd)
+            data["done"].append(terminated)
+
+            if terminated:
+                break
+            
+            obs = next_obs
+
+        data["obs"] = torch.from_numpy(np.stack(data["obs"])).to(torch.float32)
+        data["act"] = torch.from_numpy(np.stack(data["act"])).to(torch.float32)
+        data["next_obs"] = torch.from_numpy(np.stack(data["next_obs"])).to(torch.float32)
+        data["rwd"] = torch.from_numpy(np.stack(data["rwd"])).to(torch.float32)
+        data["done"] = torch.from_numpy(np.stack(data["done"])).to(torch.float32)
+        return data
+
+    def train_rl(
+        self, env, eval_env, max_steps, epochs, steps_per_epoch, update_after, update_every, 
+        rwd_fn=None, num_eval_eps=0, callback=None, verbose=True
+        ):
+        logger = Logger()
+
+        total_steps = epochs * steps_per_epoch + update_after
+        start_time = time.time()
+        
+        epoch = 0
+        obs, eps_return, eps_len = env.reset()[0], 0, 0
+        for t in range(total_steps):
+            with torch.no_grad():
+                act = self.choose_action(
+                    torch.from_numpy(obs).view(1, -1).to(torch.float32)
+                ).numpy().flatten()
+            next_obs, reward, terminated, truncated, info = env.step(act)
+            
+            eps_return += reward
+            eps_len += 1
+            
+            self.replay_buffer(obs, act, next_obs, reward, terminated, truncated)
+            obs = next_obs
+            
+            # end of trajectory handeling
+            if terminated or (eps_len + 1) > max_steps:
+                self.replay_buffer.push()
+                logger.push({"eps_return": eps_return})
+                logger.push({"eps_len": eps_len})
+                
+                # start new episode
+                obs, eps_return, eps_len = env.reset()[0], 0, 0
+
+            # train model
+            if (t + 1) > update_after and (t - update_after + 1) % update_every == 0:
+                train_stats = self.take_gradient_step(rwd_fn, logger)
+
+                if verbose:
+                    round_loss_dict = {k: round(v, 4) for k, v in train_stats.items()}
+                    print(f"e: {epoch + 1}, t: {t + 1}, {round_loss_dict}")
+
+            # end of epoch handeling
+            if (t + 1) > update_after and (t - update_after + 1) % steps_per_epoch == 0:
+                epoch = (t - update_after + 1) // steps_per_epoch
+
+                # evaluate episodes
+                if num_eval_eps > 0:
+                    eval_eps = []
+                    for i in range(num_eval_eps):
+                        eval_eps.append(self.rollout(eval_env, max_steps))
+                        logger.push({"eval_eps_return": sum(eval_eps[-1]["rwd"])})
+                        logger.push({"eval_eps_len": sum(1 - eval_eps[-1]["done"])})
+
+                logger.push({"epoch": epoch + 1})
+                logger.push({"time": time.time() - start_time})
+                logger.log()
+                print()
+
+                if t > update_after and callback is not None:
+                    callback(self, logger)
+        
+        env.close()
+        return logger
         
