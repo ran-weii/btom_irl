@@ -31,6 +31,7 @@ def parse_stacked_trajectories(obs, act, rwd, next_obs, terminated, timeout, max
             break
     return dataset
 
+
 class ReplayBuffer:
     def __init__(self, obs_dim, act_dim, max_size, momentum=0.1):
         """ Replay buffer for fully observable environments
@@ -72,20 +73,16 @@ class ReplayBuffer:
         self.next_obs_eps = [] # store a single episode
         self.rwd_eps = [] # store a single episode
         self.done_eps = [] # store a single episode
-        self.truncated_eps = [] # store a single episode
 
-    def __call__(self, obs, act, next_obs, rwd, done, truncated):
+    def __call__(self, obs, act, next_obs, rwd, done):
         """ Append transition to episode placeholder """ 
         self.obs_eps.append(obs)
         self.act_eps.append(act)
         self.next_obs_eps.append(next_obs)
         self.rwd_eps.append(np.array(rwd).reshape(1, 1))
         self.done_eps.append(np.array([int(done)]).reshape(1, 1))
-        self.truncated_eps.append(np.array([int(truncated)]).reshape(1, 1))
     
     def clear(self):
-        # self.episodes = []
-
         self.obs = []
         self.absorb = []
         self.act = []
@@ -93,21 +90,19 @@ class ReplayBuffer:
         self.next_obs = []
         self.next_absorb = []
         self.done = []
-        self.truncated = []
 
         self.eps_len = []
         self.num_eps = 0
         self.size = 0
         
-    def push(self, obs=None, act=None, next_obs=None, rwd=None, done=None, truncated=None):
+    def push(self, obs=None, act=None, next_obs=None, rwd=None, done=None):
         """ Store episode data to buffer """
         if obs is None and act is None:
             obs = np.vstack(self.obs_eps)
             act = np.vstack(self.act_eps)
             next_obs = np.vstack(self.next_obs_eps)
             rwd = np.vstack(self.rwd_eps)
-            done = np.vstack(self.done_eps)
-            truncated = np.vstack(self.truncated_eps)
+            done = np.vstack(self.done_eps)            
 
         absorb = np.zeros((len(obs), 1))
         next_absorb = np.zeros((len(obs), 1))
@@ -120,7 +115,6 @@ class ReplayBuffer:
         self.next_obs.insert(0, next_obs)
         self.next_absorb.insert(0, next_absorb)
         self.done.insert(0, done)
-        self.truncated.insert(0, truncated)
 
         self.eps_len.insert(0, len(obs))
         self.update_obs_stats(obs)
@@ -137,7 +131,6 @@ class ReplayBuffer:
                 self.next_obs = self.next_obs[:-1]
                 self.next_absorb = self.next_absorb[:-1]
                 self.done = self.done[:-1]
-                self.truncated = self.truncated[:-1]
 
                 self.size -= len(self.obs[-1])
                 self.eps_len = self.eps_len[:-1]
@@ -149,7 +142,6 @@ class ReplayBuffer:
         self.next_obs_eps = []
         self.rwd_eps = []
         self.done_eps = []
-        self.truncated_eps = []
 
     def sample(self, batch_size, prioritize=False, ratio=100):
         """ Sample random transitions 
@@ -167,7 +159,6 @@ class ReplayBuffer:
         next_obs = np.vstack(self.next_obs)
         next_absorb = np.vstack(self.next_absorb)
         done = np.vstack(self.done)
-        truncated = np.vstack(self.truncated)
         
         # prioritize new data for sampling
         if prioritize:
@@ -184,11 +175,10 @@ class ReplayBuffer:
             next_obs=next_obs[idx], 
             next_absorb=next_absorb[idx],
             done=done[idx],
-            truncated=truncated[idx]
         )
         return {k: torch.from_numpy(v).to(torch.float32) for k, v in batch.items()}
     
-    def sample_episodes(self, batch_size, prioritize=False, ratio=2, sample_truncated=False):
+    def sample_episodes(self, batch_size, prioritize=False, ratio=2):
         """ Sample complete episodes with zero sequence padding 
 
         Args:
@@ -196,7 +186,6 @@ class ReplayBuffer:
             prioritize (bool, optional): whether to perform prioritized sampling. Default=False
             ratio (int, optional): prioritization ratio. 
                 Sample from the latest batch_size * ratio episodes. Deafult=100
-            sample_truncated (bool, optional): whether to sample truncated episodes. Default=False
         """
         if prioritize:
             max_samples = min(self.num_eps, batch_size * ratio)
@@ -213,10 +202,6 @@ class ReplayBuffer:
             next_obs = torch.from_numpy(self.next_obs[i]).to(torch.float32)
             next_absorb = torch.from_numpy(self.next_absorb[i]).to(torch.float32)
             done = torch.from_numpy(self.done[i]).to(torch.float32)
-            truncated = torch.from_numpy(self.truncated[i]).to(torch.float32)
-            
-            if not sample_truncated and truncated.sum().data.item() > 0:
-                continue
             
             batch.append({
                 "obs": obs, 
@@ -226,7 +211,6 @@ class ReplayBuffer:
                 "next_obs": next_obs,
                 "next_absorb": next_absorb, 
                 "done": done,
-                "truncated": truncated
             })
         
         out = collate_fn(batch)

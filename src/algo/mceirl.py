@@ -70,8 +70,7 @@ class MCEIRL(SAC):
             next_obs = batch["next_obs"]
             rwd = np.zeros((len(obs), 1))
             done = batch["done"].reshape(-1, 1)
-            truncated = np.zeros((len(obs), 1))
-            self.real_buffer.push(obs, act, next_obs, rwd, done, truncated)
+            self.real_buffer.push(obs, act, next_obs, rwd, done)
     
     def compute_critic_loss(self, rwd_fn):
         real_batch = self.real_buffer.sample(self.batch_size)
@@ -198,7 +197,7 @@ class MCEIRL(SAC):
         start_time = time.time()
         for e in range(epochs):
             update_after_ = update_after if e == 0 else 0
-            rl_logger = self.train_rl(
+            policy_logger = self.train_policy(
                 env, eval_env, max_steps, rl_epochs, steps_per_epoch, update_after_, update_every, 
                 rwd_fn=self.compute_reward, num_eval_eps=0, verbose=verbose
             )
@@ -219,11 +218,11 @@ class MCEIRL(SAC):
             logger.log()
             print()
 
-            rl_stats = rl_logger.history[-1]
-            rl_stats = {k: v for (k, v) in rl_stats.items() if "eps" not in k}
-            rl_stats.pop("epoch")
-            rl_stats.pop("time")
-            logger.history[-1] = {**logger.history[-1], **rl_stats}
+            policy_stats = policy_logger.history[-1]
+            policy_stats = {k: v for (k, v) in policy_stats.items() if "eps" not in k}
+            policy_stats.pop("epoch")
+            policy_stats.pop("time")
+            logger.history[-1] = {**logger.history[-1], **policy_stats}
             
             if callback is not None:
                 callback(self, logger)
