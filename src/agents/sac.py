@@ -1,5 +1,6 @@
 import time
 import numpy as np
+import pandas as pd
 from copy import deepcopy
 import torch
 import torch.nn as nn
@@ -97,24 +98,25 @@ class SAC(nn.Module):
             )
         }
         
-        self.replay_buffer = ReplayBuffer(obs_dim, act_dim, buffer_size)
+        self.replay_buffer = ReplayBuffer(obs_dim, act_dim, buffer_size, momentum=0.99)
 
         self.obs_mean = nn.Parameter(torch.zeros(obs_dim), requires_grad=False)
         self.obs_variance = nn.Parameter(torch.ones(obs_dim), requires_grad=False)
+        self.rwd_mean = nn.Parameter(torch.zeros(1), requires_grad=False)
+        self.rwd_variance = nn.Parameter(torch.ones(1), requires_grad=False)
         
         self.plot_keys = ["eval_eps_return_avg", "eval_eps_len_avg", "critic_loss_avg", "actor_loss_avg"]
 
     def update_normalization_stats(self):
         if self.norm_obs:
-            mean = torch.from_numpy(self.replay_buffer.moving_mean).to(torch.float32)
-            variance = torch.from_numpy(self.replay_buffer.moving_variance).to(torch.float32)
+            self.obs_mean.data = torch.from_numpy(self.replay_buffer.obs_mean).to(torch.float32)
+            self.obs_variance.data = torch.from_numpy(self.replay_buffer.obs_variance).to(torch.float32)
 
-            self.obs_mean.data = mean
-            self.obs_variance.data = variance
-    
-    def normalize_obs(self, obs):
-        obs_norm = (obs - self.obs_mean) / self.obs_variance**0.5
-        return obs_norm
+            self.rwd_mean.data = torch.from_numpy(self.replay_buffer.rwd_mean).to(torch.float32)
+            self.rwd_variance.data = torch.from_numpy(self.replay_buffer.rwd_variance).to(torch.float32)
+
+    def normalize(self, x, mean, variance):
+        return (x - mean) / variance**0.5
     
     def sample_action(self, obs):
         mu, lv = torch.chunk(self.actor.forward(obs), 2, dim=-1)
@@ -132,102 +134,80 @@ class SAC(nn.Module):
 
     def choose_action(self, obs):
         with torch.no_grad():
-            obs_norm = self.normalize_obs(obs)
+            obs_norm = self.normalize(obs, self.obs_mean, self.obs_variance)
             a, _ = self.sample_action(obs_norm)
         return a
 
-    def compute_critic_loss(self, rwd_fn):
-        batch = self.replay_buffer.sample(self.batch_size)
-        
-        obs = batch["obs"]
+    def compute_critic_loss(self, batch, rwd_fn=None):
+        obs = self.normalize(batch["obs"], self.obs_mean, self.obs_variance)
         act = batch["act"]
         r = batch["rwd"]
-        next_obs = batch["next_obs"]
+        next_obs = self.normalize(batch["next_obs"],  self.obs_mean, self.obs_variance)
         done = batch["done"]
-        
-        # normalize observation
-        obs_norm = self.normalize_obs(obs)
-        next_obs_norm = self.normalize_obs(next_obs)
         
         with torch.no_grad():
             if rwd_fn is not None:
-                r = rwd_fn(obs_norm, act)
+                r = rwd_fn(obs, act)
 
             # sample next action
-            next_act, logp = self.sample_action(next_obs_norm)
+            next_act, logp = self.sample_action(next_obs)
 
             # compute value target
-            q1_next, q2_next = self.critic_target(next_obs_norm, next_act)
+            q1_next, q2_next = self.critic_target(next_obs, next_act)
             q_next = torch.min(q1_next, q2_next)
             v_next = q_next - self.beta * logp
             q_target = r + (1 - done) * self.gamma * v_next
         
-        q1, q2 = self.critic(obs_norm, act)
+        q1, q2 = self.critic(obs, act)
         q1_loss = torch.pow(q1 - q_target, 2).mean()
         q2_loss = torch.pow(q2 - q_target, 2).mean()
         q_loss = (q1_loss + q2_loss) / 2 
         return q_loss
     
-    def compute_actor_loss(self):
-        batch = self.replay_buffer.sample(self.batch_size)
-
-        obs = batch["obs"]
-        obs_norm = self.normalize_obs(obs)
+    def compute_actor_loss(self, batch):
+        obs = self.normalize(batch["obs"], self.obs_mean, self.obs_variance)
         
-        act, logp = self.sample_action(obs_norm)
+        act, logp = self.sample_action(obs)
         
-        q1, q2 = self.critic(obs_norm, act)
+        q1, q2 = self.critic(obs, act)
         q = torch.min(q1, q2)
 
         a_loss = torch.mean(self.beta * logp - q)
         return a_loss
 
-    def take_policy_gradient_step(self, rwd_fn=None, logger=None):
+    def take_policy_gradient_step(self, batch, rwd_fn=None):
         self.actor.train()
         self.critic.train()
         
-        actor_loss_epoch = []
-        critic_loss_epoch = []
-        for i in range(self.steps):
-            # train critic
-            critic_loss = self.compute_critic_loss(rwd_fn)
-            critic_loss.backward()
-            if self.grad_clip is not None:
-                nn.utils.clip_grad_norm_(self.critic.parameters(), self.grad_clip)
-            self.optimizers["critic"].step()
-            self.optimizers["critic"].zero_grad()
-            self.optimizers["actor"].zero_grad()
-            
-            critic_loss_epoch.append(critic_loss.data.item())
+        # train critic
+        critic_loss = self.compute_critic_loss(batch, rwd_fn)
+        critic_loss.backward()
+        if self.grad_clip is not None:
+            nn.utils.clip_grad_norm_(self.critic.parameters(), self.grad_clip)
+        self.optimizers["critic"].step()
+        self.optimizers["critic"].zero_grad()
+        self.optimizers["actor"].zero_grad()
 
-            # train actor
-            actor_loss = self.compute_actor_loss()
-            actor_loss.backward()
-            if self.grad_clip is not None:
-                nn.utils.clip_grad_norm_(self.actor.parameters(), self.grad_clip)
-            self.optimizers["actor"].step()
-            self.optimizers["actor"].zero_grad()
-            self.optimizers["critic"].zero_grad()
-            
-            actor_loss_epoch.append(actor_loss.data.item())
-            
-            # update target networks
-            with torch.no_grad():
-                for p, p_target in zip(
-                    self.critic.parameters(), self.critic_target.parameters()
-                ):
-                    p_target.data.mul_(self.polyak)
-                    p_target.data.add_((1 - self.polyak) * p.data)
-
-            if logger is not None:
-                logger.push({
-                    "actor_loss": actor_loss.cpu().data.item(),
-                    "critic_loss": critic_loss.cpu().data.item(),
-                })
+        # train actor
+        actor_loss = self.compute_actor_loss(batch)
+        actor_loss.backward()
+        if self.grad_clip is not None:
+            nn.utils.clip_grad_norm_(self.actor.parameters(), self.grad_clip)
+        self.optimizers["actor"].step()
+        self.optimizers["actor"].zero_grad()
+        self.optimizers["critic"].zero_grad()
+        
+        # update target networks
+        with torch.no_grad():
+            for p, p_target in zip(
+                self.critic.parameters(), self.critic_target.parameters()
+            ):
+                p_target.data.mul_(self.polyak)
+                p_target.data.add_((1 - self.polyak) * p.data)
 
         stats = {
-            "actor_loss": np.mean(actor_loss_epoch),
-            "critic_loss": np.mean(critic_loss_epoch),
+            "actor_loss": actor_loss.data.item(),
+            "critic_loss": critic_loss.data.item(),
         }
         
         self.actor.eval()
@@ -262,6 +242,17 @@ class SAC(nn.Module):
         data["rwd"] = torch.from_numpy(np.stack(data["rwd"])).to(torch.float32)
         data["done"] = torch.from_numpy(np.stack(data["done"])).to(torch.float32)
         return data
+    
+    def train_policy_epoch(self, logger, rwd_fn=None):
+        policy_stats_epoch = []
+        for _ in range(self.steps):
+            batch = self.replay_buffer.sample(self.batch_size)
+            policy_stats = self.take_policy_gradient_step(batch, rwd_fn=rwd_fn)
+            policy_stats_epoch.append(policy_stats)
+            logger.push(policy_stats)
+
+        policy_stats_epoch = pd.DataFrame(policy_stats_epoch).mean(0).to_dict()
+        return policy_stats_epoch
 
     def train_policy(
         self, env, eval_env, max_steps, epochs, steps_per_epoch, update_after, update_every, 
@@ -288,12 +279,14 @@ class SAC(nn.Module):
             eps_return += reward
             eps_len += 1
             
-            self.replay_buffer(obs, act, next_obs, reward, terminated)
+            self.replay_buffer.push(
+                obs, act, reward, next_obs, np.array(1. * terminated)
+            )
             obs = next_obs
             
             # end of trajectory handeling
             if terminated or (eps_len + 1) > max_steps:
-                self.replay_buffer.push()
+                self.replay_buffer.push_batch()
                 logger.push({"eps_return": eps_return})
                 logger.push({"eps_len": eps_len})
                 
@@ -303,10 +296,9 @@ class SAC(nn.Module):
             # train model
             if (t + 1) > update_after and (t - update_after + 1) % update_every == 0:
                 self.update_normalization_stats()
-                train_stats = self.take_policy_gradient_step(rwd_fn, logger)
-
+                policy_stats_epoch = self.train_policy_epoch(logger, rwd_fn=rwd_fn)
                 if verbose:
-                    round_loss_dict = {k: round(v, 4) for k, v in train_stats.items()}
+                    round_loss_dict = {k: round(v, 3) for k, v in policy_stats_epoch.items()}
                     print(f"e: {epoch + 1}, t: {t + 1}, {round_loss_dict}")
 
             # end of epoch handeling
