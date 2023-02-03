@@ -1,12 +1,13 @@
 import time
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 
 # model imports
 from src.agents.sac import SAC
 from src.agents.nn_models import MLP
-from src.agents.rl_utils import ReplayBuffer, Logger
+from src.agents.rl_utils import EpisodeReplayBuffer, Logger
 from src.agents.rl_utils import collate_fn
 
 class MCEIRL(SAC):
@@ -58,7 +59,7 @@ class MCEIRL(SAC):
             self.reward.parameters(), lr=lr_d, weight_decay=decay
         )
 
-        self.real_buffer = ReplayBuffer(obs_dim, act_dim, buffer_size)
+        self.real_buffer = EpisodeReplayBuffer(obs_dim, act_dim, buffer_size)
         
         self.plot_keys = ["eval_eps_return_avg", "eval_eps_len_avg", "reward_loss_avg", "critic_loss_avg", "actor_loss_avg"]
 
@@ -70,71 +71,8 @@ class MCEIRL(SAC):
             next_obs = batch["next_obs"]
             rwd = np.zeros((len(obs), 1))
             done = batch["done"].reshape(-1, 1)
-            self.real_buffer.push(obs, act, next_obs, rwd, done)
+            self.real_buffer.push(obs, act, rwd, next_obs, done)
     
-    def compute_critic_loss(self, rwd_fn):
-        real_batch = self.real_buffer.sample(self.batch_size)
-        fake_batch = self.replay_buffer.sample(self.batch_size)
-        
-        real_obs = real_batch["obs"]
-        real_act = real_batch["act"]
-        real_rwd = real_batch["rwd"]
-        real_next_obs = real_batch["next_obs"]
-        real_done = real_batch["done"]
-
-        fake_obs = fake_batch["obs"]
-        fake_act = fake_batch["act"]
-        fake_rwd = fake_batch["rwd"]
-        fake_next_obs = fake_batch["next_obs"]
-        fake_done = fake_batch["done"]
-
-        obs = torch.cat([real_obs, fake_obs], dim=-2)
-        act = torch.cat([real_act, fake_act], dim=-2)
-        r = torch.cat([real_rwd, fake_rwd], dim=-2)
-        next_obs = torch.cat([real_next_obs, fake_next_obs], dim=-2)
-        done = torch.cat([real_done, fake_done], dim=-2)
-        
-        # normalize observation
-        obs_norm = self.normalize_obs(obs)
-        next_obs_norm = self.normalize_obs(next_obs)
-        
-        with torch.no_grad():
-            if rwd_fn is not None:
-                r = rwd_fn(obs_norm, act)
-
-            # sample next action
-            next_act, logp = self.sample_action(next_obs_norm)
-
-            # compute value target
-            q1_next, q2_next = self.critic_target(next_obs_norm, next_act)
-            q_next = torch.min(q1_next, q2_next)
-            v_next = q_next - self.beta * logp
-            q_target = r + (1 - done) * self.gamma * v_next
-        
-        q1, q2 = self.critic(obs_norm, act)
-        q1_loss = torch.pow(q1 - q_target, 2).mean()
-        q2_loss = torch.pow(q2 - q_target, 2).mean()
-        q_loss = (q1_loss + q2_loss) / 2 
-        return q_loss
-    
-    def compute_actor_loss(self):
-        real_batch = self.real_buffer.sample(self.batch_size)
-        fake_batch = self.replay_buffer.sample(self.batch_size)
-        
-        real_obs = real_batch["obs"]
-        fake_obs = fake_batch["obs"]
-
-        obs = torch.cat([real_obs, fake_obs], dim=-2)
-        obs_norm = self.normalize_obs(obs)
-        
-        act, logp = self.sample_action(obs_norm)
-        
-        q1, q2 = self.critic(obs_norm, act)
-        q = torch.min(q1, q2)
-
-        a_loss = torch.mean(self.beta * logp - q)
-        return a_loss
-
     def compute_reward(self, obs, act):
         return self.reward(torch.cat([obs, act], dim=-1)).clip(-8, 8)
     
@@ -147,17 +85,14 @@ class MCEIRL(SAC):
     def compute_reward_loss(self, fake_batch, fake_mask):
         real_batch, real_mask = self.real_buffer.sample_episodes(self.d_batch_size, prioritize=False)
         
-        real_obs = real_batch["obs"]
+        real_obs = self.normalize(real_batch["obs"], self.obs_mean, self.obs_variance)
         real_act = real_batch["act"]
 
-        fake_obs = fake_batch["obs"]
+        fake_obs = self.normalize(fake_batch["obs"], self.obs_mean, self.obs_variance)
         fake_act = fake_batch["act"]
 
-        real_obs_norm = self.normalize_obs(real_obs)
-        fake_obs_norm = self.normalize_obs(fake_obs)        
-
-        r_cum_real = self.compute_reward_cumulents(real_obs_norm, real_act, real_mask)
-        r_cum_fake = self.compute_reward_cumulents(fake_obs_norm, fake_act, fake_mask)
+        r_cum_real = self.compute_reward_cumulents(real_obs, real_act, real_mask)
+        r_cum_fake = self.compute_reward_cumulents(fake_obs, fake_act, fake_mask)
         r_loss = -(r_cum_real.mean() - r_cum_fake.mean())
         return r_loss
 
@@ -186,6 +121,25 @@ class MCEIRL(SAC):
 
         self.reward.eval()
         return
+    
+    def train_policy_epoch(self, logger, rwd_fn=None):
+        policy_stats_epoch = []
+        for _ in range(self.steps):
+            # mix real and fake data
+            real_batch = self.real_buffer.sample(self.batch_size)
+            fake_batch = self.replay_buffer.sample(self.batch_size)
+            batch = {
+                real_k: torch.cat([real_v, fake_v], dim=0) 
+                for ((real_k, real_v), (fake_k, fake_v)) 
+                in zip(real_batch.items(), fake_batch.items())
+            }
+
+            policy_stats = self.take_policy_gradient_step(batch, rwd_fn=rwd_fn)
+            policy_stats_epoch.append(policy_stats)
+            logger.push(policy_stats)
+
+        policy_stats_epoch = pd.DataFrame(policy_stats_epoch).mean(0).to_dict()
+        return policy_stats_epoch
 
     def train(
         self, env, eval_env, max_steps, epochs, rl_epochs, steps_per_epoch, update_after, update_every,
