@@ -1,0 +1,35 @@
+#! /bin/bash
+python train_mbpo_mujoco.py \
+--cp_path "none" \
+--ensemble_dim 5 \
+--hidden_dim 128 \
+--num_hidden 2 \
+--activation relu \
+--gamma 0.99 \
+--beta 0.2 \
+--polyak 0.995 \
+--clip_lv False \
+--rollout_steps 10 \
+--buffer_size 100000 \
+--batch_size 200 \
+--rollout_batch_size 10000 \
+--rollout_min_epoch 20 \
+--rollout_max_epoch 100 \
+--real_ratio 0.05 \
+--m_steps 300 \
+--a_steps 20 \
+--lr 0.001 \
+--decay 1e-5 \
+--grad_clip 100. \
+--epochs 200 \
+--max_steps 1000 \
+--truncate False \
+--steps_per_epoch 1000 \
+--update_after 2000 \
+--update_model_every 250 \
+--update_policy_every 20 \
+--cp_every 10 \
+--verbose True \
+--render False \
+--save False \
+--seed 0
