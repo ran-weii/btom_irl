@@ -7,7 +7,6 @@ python train_mceirl_mujoco.py \
 --gamma 0.99 \
 --beta 0.2 \
 --polyak 0.995 \
---norm_obs False \
 --buffer_size 100000 \
 --d_batch_size 10 \
 --a_batch_size 200 \

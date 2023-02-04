@@ -7,7 +7,6 @@ python train_sac_mujoco.py \
 --gamma 0.99 \
 --beta 0.2 \
 --polyak 0.995 \
---norm_obs False \
 --buffer_size 1000000 \
 --batch_size 200 \
 --steps 50 \

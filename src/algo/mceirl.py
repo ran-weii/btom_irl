@@ -14,7 +14,7 @@ class MCEIRL(SAC):
     """ Maximum causal entropy inverse reinforcement learning with soft actor critic solver """
     def __init__(
         self, obs_dim, act_dim, act_lim, hidden_dim, num_hidden, activation, 
-        gamma=0.9, beta=0.2, polyak=0.995, norm_obs=False, buffer_size=int(1e5), 
+        gamma=0.9, beta=0.2, polyak=0.995, buffer_size=int(1e5), 
         d_batch_size=10, a_batch_size=200, d_steps=3, a_steps=50, 
         lr_d=3e-4, lr_a=1e-3, decay=0., grad_clip=None
         ):
@@ -29,7 +29,6 @@ class MCEIRL(SAC):
             gamma (float, optional): discount factor. Default=0.9
             beta (float, optional): softmax temperature. Default=0.2
             polyak (float, optional): target network polyak averaging factor. Default=0.995
-            norm_obs (bool, optional): whether to normalize observations. Default=False
             buffer_size (int, optional): replay buffer size. Default=1e5
             d_batch_size (int, optional): reward batch size. Default=10
             a_batch_size (int, optional): agent batch size. Default=200
@@ -42,7 +41,7 @@ class MCEIRL(SAC):
         """
         super().__init__(
             obs_dim, act_dim, act_lim, hidden_dim, num_hidden, activation, 
-            gamma, beta, polyak, norm_obs, buffer_size, a_batch_size, a_steps, 
+            gamma, beta, polyak, buffer_size, a_batch_size, a_steps, 
             lr_a, decay, grad_clip, 
         )
         assert d_steps > 1
@@ -85,10 +84,10 @@ class MCEIRL(SAC):
     def compute_reward_loss(self, fake_batch, fake_mask):
         real_batch, real_mask = self.real_buffer.sample_episodes(self.d_batch_size, prioritize=False)
         
-        real_obs = self.normalize(real_batch["obs"], self.obs_mean, self.obs_variance)
+        real_obs = real_batch["obs"]
         real_act = real_batch["act"]
 
-        fake_obs = self.normalize(fake_batch["obs"], self.obs_mean, self.obs_variance)
+        fake_obs = fake_batch["obs"]
         fake_act = fake_batch["act"]
 
         r_cum_real = self.compute_reward_cumulents(real_obs, real_act, real_mask)

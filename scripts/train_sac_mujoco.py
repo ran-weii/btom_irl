@@ -24,7 +24,6 @@ def parse_args():
     parser.add_argument("--gamma", type=float, default=0.99, help="trainer discount factor, default=0.9")
     parser.add_argument("--beta", type=float, default=0.2, help="softmax temperature, default=0.1")
     parser.add_argument("--polyak", type=float, default=0.995, help="polyak averaging factor, default=0.995")
-    parser.add_argument("--norm_obs", type=bool_, default=False, help="whether to normalize observations for agent and algo, default=False")
     # training args
     parser.add_argument("--buffer_size", type=int, default=1e6, help="replay buffer size, default=1e6")
     parser.add_argument("--batch_size", type=int, default=200, help="training batch size, default=200")
@@ -72,7 +71,7 @@ def main(arglist):
     agent = SAC(
         obs_dim, act_dim, act_lim, arglist["hidden_dim"], arglist["num_hidden"], arglist["activation"],
         gamma=arglist["gamma"], beta=arglist["beta"], polyak=arglist["polyak"],
-        norm_obs=arglist["norm_obs"], buffer_size=arglist["buffer_size"], batch_size=arglist["batch_size"],
+        buffer_size=arglist["buffer_size"], batch_size=arglist["batch_size"],
         steps=arglist["steps"], lr=arglist["lr"], decay=arglist["decay"], grad_clip=arglist["grad_clip"], 
     )
     plot_keys = agent.plot_keys

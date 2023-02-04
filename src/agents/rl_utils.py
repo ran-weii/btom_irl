@@ -42,6 +42,12 @@ def update_moving_stats(x, old_mean, old_mean_square, old_variance, size, moment
     new_variance = old_variance * momentum + new_variance * (1 - momentum)
     return new_mean, new_mean_square, new_variance
 
+def normalize(x, mean, variance):
+    return (x - mean) / variance**0.5
+
+def denormalize(x, mean, variance):
+    return x * variance**0.5 + mean
+
 
 class ReplayBuffer:
     def __init__(self, obs_dim, act_dim, max_size, momentum=0.1):
@@ -80,6 +86,22 @@ class ReplayBuffer:
         self.rwd_mean = np.zeros((1,))
         self.rwd_mean_square = np.zeros((1,))
         self.rwd_variance = np.ones((1,))
+    
+    def clear(self):
+        self.obs = np.empty(shape=(0, self.obs_dim))
+        self.act = np.empty(shape=(0, self.act_dim))
+        self.rwd = np.empty(shape=(0, 1))
+        self.next_obs = np.empty(shape=(0, self.obs_dim))
+        self.done = np.empty(shape=(0, 1))
+        
+        # batch placeholder
+        self.obs_batch = np.empty(shape=(0, self.obs_dim))
+        self.act_batch = np.empty(shape=(0, self.act_dim))
+        self.rwd_batch = np.empty(shape=(0, 1))
+        self.next_obs_batch = np.empty(shape=(0, self.obs_dim))
+        self.done_batch = np.empty(shape=(0, 1))
+
+        self.size = 0
 
     def push(self, obs, act, rwd, next_obs, done):
         """ Temporarily store """

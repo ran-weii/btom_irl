@@ -28,7 +28,6 @@ def parse_args():
     parser.add_argument("--gamma", type=float, default=0.99, help="trainer discount factor, default=0.9")
     parser.add_argument("--beta", type=float, default=0.2, help="softmax temperature, default=1.")
     parser.add_argument("--polyak", type=float, default=0.995, help="polyak averaging factor, default=0.995")
-    parser.add_argument("--norm_obs", type=bool_, default=False, help="whether to normalize observations for agent and algo, default=False")
     # training args
     parser.add_argument("--buffer_size", type=int, default=1e5, help="replay buffer size, default=1e5")
     parser.add_argument("--d_batch_size", type=int, default=10, help="reward training batch size, default=10")
@@ -99,7 +98,7 @@ def main(arglist):
     agent = MCEIRL(
         obs_dim, act_dim, act_lim, arglist["hidden_dim"], arglist["num_hidden"], arglist["activation"],
         gamma=arglist["gamma"], beta=arglist["beta"], polyak=arglist["polyak"],
-        norm_obs=arglist["norm_obs"], buffer_size=arglist["buffer_size"], d_batch_size=arglist["d_batch_size"], 
+        buffer_size=arglist["buffer_size"], d_batch_size=arglist["d_batch_size"], 
         a_batch_size=arglist["a_batch_size"], d_steps=arglist["d_steps"], a_steps=arglist["a_steps"], 
         lr_d=arglist["lr_d"], lr_a=arglist["lr_a"], decay=arglist["decay"], grad_clip=arglist["grad_clip"]
     )

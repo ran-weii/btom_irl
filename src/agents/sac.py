@@ -41,7 +41,7 @@ class SAC(nn.Module):
     """ Soft actor critic """
     def __init__(
         self, obs_dim, act_dim, act_lim, hidden_dim, num_hidden, activation, 
-        gamma=0.9, beta=0.2, polyak=0.995, norm_obs=False, buffer_size=int(1e6), 
+        gamma=0.9, beta=0.2, polyak=0.995, buffer_size=int(1e6), 
         batch_size=100, steps=50, lr=1e-3, decay=0., grad_clip=None
         ):
         """
@@ -55,7 +55,6 @@ class SAC(nn.Module):
             gamma (float, optional): discount factor. Default=0.9
             beta (float, optional): softmax temperature. Default=0.2
             polyak (float, optional): target network polyak averaging factor. Default=0.995
-            norm_obs (bool, optional): whether to normalize observations. Default=False
             buffer_size (int, optional): replay buffer size. Default=1e6
             batch_size (int, optional): actor and critic batch size. Default=100
             steps (int, optional): actor critic update steps per training step. Default=50
@@ -70,7 +69,6 @@ class SAC(nn.Module):
         self.gamma = gamma
         self.beta = beta
         self.polyak = polyak
-        self.norm_obs = norm_obs
     
         self.buffer_size = buffer_size
         self.batch_size = batch_size
@@ -99,24 +97,8 @@ class SAC(nn.Module):
         }
         
         self.replay_buffer = ReplayBuffer(obs_dim, act_dim, buffer_size, momentum=0.99)
-
-        self.obs_mean = nn.Parameter(torch.zeros(obs_dim), requires_grad=False)
-        self.obs_variance = nn.Parameter(torch.ones(obs_dim), requires_grad=False)
-        self.rwd_mean = nn.Parameter(torch.zeros(1), requires_grad=False)
-        self.rwd_variance = nn.Parameter(torch.ones(1), requires_grad=False)
         
         self.plot_keys = ["eval_eps_return_avg", "eval_eps_len_avg", "critic_loss_avg", "actor_loss_avg"]
-
-    def update_normalization_stats(self):
-        if self.norm_obs:
-            self.obs_mean.data = torch.from_numpy(self.replay_buffer.obs_mean).to(torch.float32)
-            self.obs_variance.data = torch.from_numpy(self.replay_buffer.obs_variance).to(torch.float32)
-
-            self.rwd_mean.data = torch.from_numpy(self.replay_buffer.rwd_mean).to(torch.float32)
-            self.rwd_variance.data = torch.from_numpy(self.replay_buffer.rwd_variance).to(torch.float32)
-
-    def normalize(self, x, mean, variance):
-        return (x - mean) / variance**0.5
     
     def sample_action(self, obs):
         mu, lv = torch.chunk(self.actor.forward(obs), 2, dim=-1)
@@ -134,15 +116,14 @@ class SAC(nn.Module):
 
     def choose_action(self, obs):
         with torch.no_grad():
-            obs_norm = self.normalize(obs, self.obs_mean, self.obs_variance)
-            a, _ = self.sample_action(obs_norm)
+            a, _ = self.sample_action(obs)
         return a
 
     def compute_critic_loss(self, batch, rwd_fn=None):
-        obs = self.normalize(batch["obs"], self.obs_mean, self.obs_variance)
+        obs = batch["obs"]
         act = batch["act"]
         r = batch["rwd"]
-        next_obs = self.normalize(batch["next_obs"],  self.obs_mean, self.obs_variance)
+        next_obs = batch["next_obs"]
         done = batch["done"]
         
         with torch.no_grad():
@@ -165,7 +146,7 @@ class SAC(nn.Module):
         return q_loss
     
     def compute_actor_loss(self, batch):
-        obs = self.normalize(batch["obs"], self.obs_mean, self.obs_variance)
+        obs = batch["obs"]
         
         act, logp = self.sample_action(obs)
         
@@ -295,7 +276,6 @@ class SAC(nn.Module):
 
             # train model
             if (t + 1) > update_after and (t - update_after + 1) % update_every == 0:
-                self.update_normalization_stats()
                 policy_stats_epoch = self.train_policy_epoch(logger, rwd_fn=rwd_fn)
                 if verbose:
                     round_loss_dict = {k: round(v, 3) for k, v in policy_stats_epoch.items()}
