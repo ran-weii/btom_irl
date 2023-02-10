@@ -128,79 +128,114 @@ class MBPO(SAC):
         loss = -logp.mean()
         return loss
     
-    def eval_model(self, batch):
+    def eval_reward(self, batch):
         self.reward.eval()
-        self.dynamics.eval()
 
         obs = batch["obs"]
         act = batch["act"]
         rwd = batch["rwd"]
+        
+        with torch.no_grad():
+            rwd_pred = self.compute_reward(obs, act)
+        
+        rwd_mae = torch.abs(rwd_pred - rwd).mean()
+        
+        stats = {
+            "rwd_mae": rwd_mae.data.item()
+        }
+        return stats
+
+    def eval_model(self, batch):
+        self.dynamics.eval()
+
+        obs = batch["obs"]
+        act = batch["act"]
         next_obs = batch["next_obs"]
 
         with torch.no_grad():
             next_obs_pred = self.sample_transition_dist(obs, act)
-            rwd_pred = self.compute_reward(obs, act)
             
         obs_mae = torch.abs(next_obs_pred - next_obs).mean()
-        rwd_mae = torch.abs(rwd_pred - rwd).mean()
         
         stats = {
-            "obs_mae": obs_mae.data.item(),
-            "rwd_mae": rwd_mae.data.item()
+            "obs_mae": obs_mae.data.item()
         }
         return stats
     
-    def take_model_gradient_step(self, batch):
+    def take_reward_gradient_step(self, batch):
         self.reward.train()
-        self.dynamics.train()
         
-        # train reward
         reward_loss = self.compute_reward_loss(batch)
         reward_loss.backward()
         self.optimizers["reward"].step()
         self.optimizers["reward"].zero_grad()
+        
+        stats = {
+            "rwd_loss": reward_loss.data.item(),
+        }
+        self.reward.eval()
+        return stats
 
-        # train dynamics
+    def take_model_gradient_step(self, batch):
+        self.dynamics.train()
+        
         dynamics_loss = self.compute_dynamics_loss(batch)
         dynamics_loss.backward()
         self.optimizers["dynamics"].step()
         self.optimizers["dynamics"].zero_grad()
         
         stats = {
-            "rwd_loss": reward_loss.data.item(),
             "obs_loss": dynamics_loss.data.item(),
         }
 
-        self.reward.eval()
         self.dynamics.eval()
         return stats
 
-    def rollout_dynamics(self, real_batch, rollout_steps):
+    def rollout_dynamics(self, obs, done, rollout_steps):
+        """ Rollout dynamics model
+        Returns:
+            data (dict): size=[rollout_steps, batch_size, dim]
+        """
         self.reward.eval()
         self.dynamics.eval()
 
-        obs = real_batch["obs"].clone()
-        done = real_batch["done"].clone()
+        obs = obs.clone()
+        done = done.clone()
+        data = {"obs": [], "act": [], "next_obs": [], "rwd": [], "done": []}
         for t in range(rollout_steps):
             with torch.no_grad():
                 act = self.choose_action(obs)
                 rwd = self.compute_reward(obs, act)
                 next_obs = self.sample_transition_dist(obs, act)
             
-            self.replay_buffer.push_batch(
-                obs.numpy(), act.numpy(), rwd.numpy(), next_obs.numpy(), done.numpy()
-            )
+            data["obs"].append(obs)
+            data["act"].append(act)
+            data["next_obs"].append(next_obs)
+            data["rwd"].append(rwd)
+            data["done"].append(done)
             
             obs = next_obs.clone()
+
+        data["obs"] = torch.stack(data["obs"])
+        data["act"] = torch.stack(data["act"])
+        data["next_obs"] = torch.stack(data["next_obs"])
+        data["rwd"] = torch.stack(data["rwd"])
+        data["done"] = torch.stack(data["done"])
+        return data
     
     def train_model_epoch(self, logger):
         model_stats_epoch = []
         for _ in range(self.m_steps):
             train_batch = self.real_buffer.sample(self.batch_size)
             eval_batch = self.real_buffer.sample(int(self.batch_size * 0.3))
+            reward_train_stats = self.take_reward_gradient_step(train_batch)
             model_train_stats = self.take_model_gradient_step(train_batch)
+            reward_eval_stats = self.eval_reward(eval_batch)
             model_eval_stats = self.eval_model(eval_batch)
-            model_stats = {**model_train_stats, **model_eval_stats}
+            model_stats = {
+                **reward_train_stats, **reward_eval_stats,
+                **model_train_stats, **model_eval_stats
+            }
             model_stats_epoch.append(model_stats)
             logger.push(model_stats)
 
@@ -287,7 +322,14 @@ class MBPO(SAC):
                 self.replay_buffer.clear()
                 rollout_steps = self.compute_rollout_steps(epoch + 1)
                 real_batch = self.real_buffer.sample(self.rollout_batch_size)
-                self.rollout_dynamics(real_batch, rollout_steps)
+                rollout_data = self.rollout_dynamics(real_batch["obs"], real_batch["done"], rollout_steps)
+                self.replay_buffer.push_batch(
+                    rollout_data["obs"].flatten(0, 1).numpy(),
+                    rollout_data["act"].flatten(0, 1).numpy(),
+                    rollout_data["rwd"].flatten(0, 1).numpy(),
+                    rollout_data["next_obs"].flatten(0, 1).numpy(),
+                    rollout_data["done"].flatten(0, 1).numpy()
+                )
                 print("epoch", epoch, "rollout steps", rollout_steps)
 
             # train policy
