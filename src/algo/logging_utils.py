@@ -22,7 +22,7 @@ def plot_history(df_history, plot_keys, plot_std=True):
     fig, ax = plt.subplots(1, num_cols, figsize=(width, 4))
     for i in range(num_cols):
         ax[i].plot(df_history["epoch"], df_history[plot_keys[i]])
-        if plot_std:
+        if plot_std and plot_keys[i].replace("_avg", "_std") in df_history.columns:
             std = df_history[plot_keys[i].replace("_avg", "_std")]
             ax[i].fill_between(
                 df_history["epoch"],
