@@ -1,0 +1,35 @@
+#! /bin/bash
+python train_offline_irl_mujoco.py \
+--cp_path "none" \
+--dynamics_path "../exp/dynamics/02-08-2023 20-19-31" \
+--ensemble_dim 5 \
+--hidden_dim 128 \
+--num_hidden 2 \
+--activation relu \
+--gamma 0.99 \
+--beta 0.2 \
+--polyak 0.995 \
+--clip_lv False \
+--rollout_batch_size 25 \
+--rollout_steps 400 \
+--buffer_size 100000 \
+--d_batch_size 10 \
+--a_batch_size 200 \
+--d_steps 3 \
+--a_steps 20 \
+--lr_d 0.0003 \
+--lr_a 0.001 \
+--pess_penalty 1. \
+--decay 1e-5 \
+--grad_clip 100. \
+--epochs 200 \
+--rl_epochs 2 \
+--max_steps 1000 \
+--truncate False \
+--steps_per_epoch 50 \
+--update_after 10 \
+--update_every 1 \
+--cp_every 10 \
+--verbose True \
+--save True \
+--seed 0
