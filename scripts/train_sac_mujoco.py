@@ -32,13 +32,14 @@ def parse_args():
     parser.add_argument("--decay", type=float, default=1e-5, help="weight decay, default=1e-5")
     parser.add_argument("--grad_clip", type=float, default=1000., help="gradient clipping, default=1000.")
     # rollout args
+    parser.add_argument("--env_name", type=str, default="Hopper-v4", help="environment name, default=Hopper-v4")
     parser.add_argument("--epochs", type=int, default=100, help="number of training epochs, default=10")
     parser.add_argument("--max_steps", type=int, default=1000, help="max steps per episode, default=500")
-    parser.add_argument("--truncate", type=bool_, default=True, help="whether to truncate episode when unhealthy, default=True")
     parser.add_argument("--steps_per_epoch", type=int, default=4000)
     parser.add_argument("--update_after", type=int, default=2000)
     parser.add_argument("--update_every", type=int, default=50)
     parser.add_argument("--cp_every", type=int, default=10, help="checkpoint interval, default=10")
+    parser.add_argument("--num_eval_eps", type=int, default=5, help="number of evaluation episodes, default=5")
     parser.add_argument("--verbose", type=bool_, default=True)
     parser.add_argument("--render", type=bool_, default=False)
     parser.add_argument("--save", type=bool_, default=True)
@@ -54,15 +55,10 @@ def main(arglist):
     
     render_mode = "human" if arglist["render"] else None
     env = gym.make(
-        "Hopper-v4", 
-        terminate_when_unhealthy=arglist["truncate"], 
+        arglist["env_name"],  
         render_mode=render_mode
     )
-    eval_env = gym.make(
-        "Hopper-v4", 
-        terminate_when_unhealthy=arglist["truncate"], 
-        render_mode=render_mode
-    )
+    env.np_random = gym.utils.seeding.np_random(arglist["seed"])[0]
 
     obs_dim = env.observation_space.low.shape[0]
     act_dim = env.action_space.low.shape[0]
@@ -102,9 +98,15 @@ def main(arglist):
         callback = SaveCallback(arglist, plot_keys, cp_history=cp_history)
     
     # training loop
+    eval_env = gym.make(
+        arglist["env_name"], 
+        render_mode=render_mode
+    )
+    eval_env.np_random = gym.utils.seeding.np_random(arglist["seed"])[0]
+    
     logger = agent.train_policy(
         env, eval_env, arglist["max_steps"], arglist["epochs"], arglist["steps_per_epoch"],
-        arglist["update_after"], arglist["update_every"], rwd_fn=None, num_eval_eps=5,
+        arglist["update_after"], arglist["update_every"], rwd_fn=None, num_eval_eps=arglist["num_eval_eps"],
         callback=callback, verbose=arglist["verbose"]
     )
 
