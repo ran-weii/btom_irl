@@ -45,7 +45,7 @@ class MBPO(SAC):
             m_steps (int, optional): model update steps per training step. Default=100
             a_steps (int, optional): policy update steps per training step. Default=50
             lr (float, optional): learning rate. Default=1e-3
-            decay (float, optional): weight decay. Default=0.
+            decay ([list, None], optional): weight decay for each dynamics and reward model layer. Default=None.
             grad_clip (float, optional): gradient clipping. Default=None
         """
         super().__init__(
