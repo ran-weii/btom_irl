@@ -11,7 +11,6 @@ python train_sac_mujoco.py \
 --batch_size 200 \
 --steps 50 \
 --lr 0.001 \
---decay 1e-5 \
 --grad_clip 100. \
 --env_name "Hopper-v4" \
 --epochs 200 \

@@ -42,7 +42,7 @@ class SAC(nn.Module):
     def __init__(
         self, obs_dim, act_dim, act_lim, hidden_dim, num_hidden, activation, 
         gamma=0.9, beta=0.2, polyak=0.995, buffer_size=int(1e6), 
-        batch_size=100, steps=50, lr=1e-3, decay=0., grad_clip=None
+        batch_size=100, steps=50, lr=1e-3, grad_clip=None
         ):
         """
         Args:
@@ -59,7 +59,6 @@ class SAC(nn.Module):
             batch_size (int, optional): actor and critic batch size. Default=100
             steps (int, optional): actor critic update steps per training step. Default=50
             lr (float, optional): learning rate. Default=1e-3
-            decay (float, optional): weight decay. Default=0.
             grad_clip (float, optional): gradient clipping. Default=None
         """
         super().__init__()
@@ -74,7 +73,6 @@ class SAC(nn.Module):
         self.batch_size = batch_size
         self.steps = steps
         self.lr = lr
-        self.decay = decay
         self.grad_clip = grad_clip
         
         self.actor = MLP(obs_dim, act_dim * 2, hidden_dim, num_hidden, activation)
