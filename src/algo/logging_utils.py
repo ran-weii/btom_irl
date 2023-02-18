@@ -32,7 +32,7 @@ def plot_history(df_history, plot_keys, plot_std=True):
             )
 
         ax[i].set_xlabel("epoch")
-        ax[i].set_ylabel(plot_keys[i])
+        ax[i].set_title(plot_keys[i])
         ax[i].grid()
     
     plt.tight_layout()

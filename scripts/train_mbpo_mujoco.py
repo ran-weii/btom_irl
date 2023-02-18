@@ -9,10 +9,12 @@ import matplotlib.pyplot as plt
 import torch 
 
 from src.agents.mbpo import MBPO
+from src.env.gym_wrapper import get_termination_fn
 from src.algo.logging_utils import SaveCallback
 
 def parse_args():
     bool_ = lambda x: x if isinstance(x, bool) else x == "True"
+    list_ = lambda x: [float(i.replace(" ", "")) for i in x.split(",")]
     
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=0)
@@ -27,29 +29,34 @@ def parse_args():
     parser.add_argument("--beta", type=float, default=0.2, help="softmax temperature, default=0.1")
     parser.add_argument("--polyak", type=float, default=0.995, help="polyak averaging factor, default=0.995")
     parser.add_argument("--clip_lv", type=bool_, default=False, help="whether to clip observation variance, default=False")
+    parser.add_argument("--rwd_clip_max", type=float, default=10., help="clip reward max value, default=10.")
     # training args
-    parser.add_argument("--rollout_steps", type=int, default=100, help="dynamics rollout steps, default=100")
     parser.add_argument("--buffer_size", type=int, default=1e6, help="replay buffer size, default=1e6")
     parser.add_argument("--batch_size", type=int, default=200, help="training batch size, default=200")
     parser.add_argument("--rollout_batch_size", type=int, default=10000, help="model rollout batch size, default=10000")
+    parser.add_argument("--rollout_steps", type=int, default=100, help="dynamics rollout steps, default=100")
+    parser.add_argument("--topk", type=int, default=5, help="top k models to perform rollout, default=5")
     parser.add_argument("--rollout_min_epoch", type=int, default=20, help="epoch to start increasing rollout steps, default=20")
     parser.add_argument("--rollout_max_epoch", type=int, default=100, help="epoch to stop increasing rollout steps, default=100")
     parser.add_argument("--real_ratio", type=float, default=0.05, help="ratio of real samples for policy training, default=0.05")
+    parser.add_argument("--eval_ratio", type=float, default=0.2, help="ratio of real samples for model evaluation, default=0.2")
     parser.add_argument("--m_steps", type=int, default=100, help="model training steps per update, default=100")
     parser.add_argument("--a_steps", type=int, default=50, help="policy training steps per update, default=50")
     parser.add_argument("--lr", type=float, default=0.001, help="learning rate, default=0.001")
-    parser.add_argument("--decay", type=float, default=1e-5, help="weight decay, default=1e-5")
+    parser.add_argument("--decay", type=list_, default=[0.000025, 0.00005, 0.000075, 0.0001], 
+        help="weight decay for each layer, default=[0.000025, 0.00005, 0.000075, 0.0001]")
     parser.add_argument("--grad_clip", type=float, default=1000., help="gradient clipping, default=1000.")
     # rollout args
+    parser.add_argument("--env_name", type=str, default="Hopper-v4", help="environment name, default=Hopper-v4")
     parser.add_argument("--epochs", type=int, default=100, help="number of training epochs, default=10")
-    parser.add_argument("--max_steps", type=int, default=1000, help="max steps per episode, default=500")
-    parser.add_argument("--truncate", type=bool_, default=True, help="whether to truncate episode when unhealthy, default=True")
+    parser.add_argument("--max_steps", type=int, default=1000, help="max steps per episode, default=500") 
     parser.add_argument("--steps_per_epoch", type=int, default=4000)
     parser.add_argument("--update_after", type=int, default=2000)
     parser.add_argument("--update_model_every", type=int, default=250)
     parser.add_argument("--update_policy_every", type=int, default=50)
     parser.add_argument("--cp_every", type=int, default=10, help="checkpoint interval, default=10")
-    parser.add_argument("--verbose", type=bool_, default=True)
+    parser.add_argument("--num_eval_eps", type=int, default=5, help="number of evaluation episodes, default=5")
+    parser.add_argument("--verbose", type=int, default=10, help="verbose frequency, default=10")
     parser.add_argument("--render", type=bool_, default=False)
     parser.add_argument("--save", type=bool_, default=True)
     arglist = parser.parse_args()
@@ -64,30 +71,25 @@ def main(arglist):
     
     render_mode = "human" if arglist["render"] else None
     env = gym.make(
-        "Hopper-v4", 
-        terminate_when_unhealthy=arglist["truncate"], 
+        arglist["env_name"], 
         render_mode=render_mode
     )
-    eval_env = gym.make(
-        "Hopper-v4", 
-        terminate_when_unhealthy=arglist["truncate"], 
-        render_mode=render_mode
-    )
+    env.np_random = gym.utils.seeding.np_random(arglist["seed"])[0]
 
     obs_dim = env.observation_space.low.shape[0]
     act_dim = env.action_space.low.shape[0]
     act_lim = torch.from_numpy(env.action_space.high).to(torch.float32)
-    
+    termination_fn = get_termination_fn(arglist["env_name"])
+
     agent = MBPO(
         obs_dim, act_dim, act_lim, 
         arglist["ensemble_dim"], arglist["hidden_dim"], arglist["num_hidden"], arglist["activation"],
-        gamma=arglist["gamma"], beta=arglist["beta"], polyak=arglist["polyak"],
-        clip_lv=arglist["clip_lv"], rollout_steps=arglist["rollout_steps"], 
-        buffer_size=arglist["buffer_size"], batch_size=arglist["batch_size"], 
-        rollout_batch_size=arglist["rollout_batch_size"], rollout_min_epoch=arglist["rollout_min_epoch"], 
-        rollout_max_epoch=arglist["rollout_max_epoch"], real_ratio=arglist["real_ratio"], 
-        m_steps=arglist["m_steps"], a_steps=arglist["a_steps"], 
-        lr=arglist["lr"], decay=arglist["decay"], grad_clip=arglist["grad_clip"], 
+        gamma=arglist["gamma"], beta=arglist["beta"], polyak=arglist["polyak"], clip_lv=arglist["clip_lv"], 
+        rwd_clip_max=arglist["rwd_clip_max"], buffer_size=arglist["buffer_size"], batch_size=arglist["batch_size"], 
+        rollout_steps=arglist["rollout_steps"], rollout_batch_size=arglist["rollout_batch_size"], topk=arglist["topk"],
+        rollout_min_epoch=arglist["rollout_min_epoch"], rollout_max_epoch=arglist["rollout_max_epoch"], 
+        termination_fn=termination_fn, real_ratio=arglist["real_ratio"], eval_ratio=arglist["eval_ratio"], 
+        m_steps=arglist["m_steps"], a_steps=arglist["a_steps"], lr=arglist["lr"], decay=arglist["decay"], grad_clip=arglist["grad_clip"], 
     )
     plot_keys = agent.plot_keys
     
@@ -117,10 +119,16 @@ def main(arglist):
         callback = SaveCallback(arglist, plot_keys, cp_history=cp_history)
     
     # training loop
+    eval_env = gym.make(
+        arglist["env_name"], 
+        render_mode=render_mode
+    )
+    eval_env.np_random = gym.utils.seeding.np_random(arglist["seed"])[0]
+
     logger = agent.train_policy(
         env, eval_env, arglist["max_steps"], arglist["epochs"], arglist["steps_per_epoch"],
-        arglist["update_after"], arglist["update_model_every"], arglist["update_policy_every"], rwd_fn=None, num_eval_eps=5,
-        callback=callback, verbose=arglist["verbose"]
+        arglist["update_after"], arglist["update_model_every"], arglist["update_policy_every"], 
+        rwd_fn=None, num_eval_eps=arglist["num_eval_eps"], callback=callback, verbose=arglist["verbose"]
     )
 
     if arglist["save"]:
