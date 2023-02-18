@@ -14,9 +14,9 @@ class MBPO(SAC):
     """ Model-based policy optimization """
     def __init__(
         self, obs_dim, act_dim, act_lim, ensemble_dim, hidden_dim, num_hidden, activation, 
-        gamma=0.9, beta=0.2, polyak=0.995, clip_lv=False, rollout_steps=10, buffer_size=1e6, 
-        batch_size=200, rollout_batch_size=10000, rollout_min_epoch=20, rollout_max_epoch=100, 
-        real_ratio=0.05, m_steps=100, a_steps=50, lr=0.001, decay=0, grad_clip=None
+        gamma=0.9, beta=0.2, polyak=0.995, clip_lv=False, rwd_clip_max=10., buffer_size=1e6, batch_size=200, 
+        rollout_batch_size=10000, rollout_steps=10, topk=5, rollout_min_epoch=20, rollout_max_epoch=100, 
+        termination_fn=None, real_ratio=0.05, eval_ratio=0.2, m_steps=100, a_steps=50, lr=0.001, decay=None, grad_clip=None
         ):
         """
         Args:
@@ -31,12 +31,17 @@ class MBPO(SAC):
             beta (float, optional): softmax temperature. Default=0.2
             polyak (float, optional): target network polyak averaging factor. Default=0.995
             clip_lv (bool, optional): whether to soft clip observation log variance. Default=False
+            rwd_clip_max (float, optional): clip reward max value. Default=10.
             buffer_size (int, optional): replay buffer size. Default=1e6
             batch_size (int, optional): actor and critic batch size. Default=100
             rollout_batch_size (int, optional): model_rollout batch size. Default=10000
+            rollout_steps (int, optional): number of model rollout steps. Default=10
+            topk (int, optional): top k models to perform rollout. Default=5
             min_rollout_epoch (int, optional): epoch to start increasing rollout length. Default=20
             max_rollout_epoch (int, optional): epoch to stop increasing rollout length. Default=100
+            termination_fn (func, optional): termination function to output rollout done. Default=None
             real_ratio (float, optional): ratio of real samples for policy training. Default=0.05
+            eval_ratio (float, optional): ratio of real samples for model evaluation. Default=0.2
             m_steps (int, optional): model update steps per training step. Default=100
             a_steps (int, optional): policy update steps per training step. Default=50
             lr (float, optional): learning rate. Default=1e-3
@@ -50,12 +55,17 @@ class MBPO(SAC):
         )
         self.ensemble_dim = ensemble_dim
         self.clip_lv = clip_lv
+        self.rwd_clip_max = rwd_clip_max
         
         self.rollout_batch_size = rollout_batch_size
+        self.rollout_steps = rollout_steps
+        self.topk = topk
+        self.topk_dist = torch.ones(ensemble_dim) / ensemble_dim # model selection distribution
         self.rollout_min_epoch = rollout_min_epoch # used to calculate rollout steps
         self.rollout_max_epoch = rollout_max_epoch # used to calculate rollout steps
-        self.rollout_steps = rollout_steps
+        self.termination_fn = termination_fn
         self.real_ratio = real_ratio
+        self.eval_ratio = eval_ratio
         self.m_steps = m_steps
 
         self.reward = MLP(
@@ -65,11 +75,16 @@ class MBPO(SAC):
             obs_dim + act_dim, obs_dim * 2, ensemble_dim, hidden_dim, num_hidden, activation
         )
         
+        # set reward and dynamics decay weights
+        self.decay = decay
+        if self.decay is None:
+            self.decay = [0. for l in self.dynamics.layers if hasattr(l, "weight")]
+        
         self.optimizers["reward"] = torch.optim.Adam(
-            self.reward.parameters(), lr=lr, weight_decay=decay
+            self.reward.parameters(), lr=lr
         )
         self.optimizers["dynamics"] = torch.optim.Adam(
-            self.dynamics.parameters(), lr=lr, weight_decay=decay
+            self.dynamics.parameters(), lr=lr, 
         )
         
         # buffer to store environment data
@@ -84,7 +99,7 @@ class MBPO(SAC):
         self.min_model_lv = nn.Parameter(-torch.ones(self.obs_dim) * 10, requires_grad=False)
 
     def compute_reward(self, obs, act):
-        r = self.reward.forward(torch.cat([obs, act], dim=-1)).clip(-10, 10)
+        r = self.reward.forward(torch.cat([obs, act], dim=-1)).clip(-self.rwd_clip_max, self.rwd_clip_max)
         return r
     
     def compute_transition_dist(self, obs, act):
@@ -105,9 +120,10 @@ class MBPO(SAC):
     def sample_transition_dist(self, obs, act):
         next_obs = self.compute_transition_dist(obs, act).rsample()
         
-        # randomly select from the ensemble
-        ensemble_idx = torch.randint(0, self.ensemble_dim, size=(len(obs),))
-        next_obs = next_obs[torch.arange(len(obs)), ensemble_idx]
+        # randomly select from top models
+        ensemble_idx = torch_dist.Categorical(self.topk_dist).sample(obs.shape[:-1]).unsqueeze(-1)
+        ensemble_idx = ensemble_idx.unsqueeze(-1).repeat_interleave(obs.shape[-1], dim=-1) # duplicate alone feature dim
+        next_obs = torch.gather(next_obs, -2, ensemble_idx).squeeze(-2)
         return next_obs
 
     def compute_reward_loss(self, batch):
@@ -116,7 +132,8 @@ class MBPO(SAC):
         r = batch["rwd"]
 
         r_pred = self.compute_reward(obs, act)
-        loss = torch.pow(r_pred - r, 2).mean()
+        decay_loss = self.compute_decay_loss(self.reward)
+        loss = torch.pow(r_pred - r, 2).mean() + decay_loss
         return loss
 
     def compute_dynamics_loss(self, batch):
@@ -125,9 +142,18 @@ class MBPO(SAC):
         next_obs = batch["next_obs"]
 
         logp = self.compute_transition_log_prob(obs, act, next_obs).sum(-1)
-        loss = -logp.mean()
+        decay_loss = self.compute_decay_loss(self.dynamics)
+        loss = -logp.mean() + decay_loss
         return loss
     
+    def compute_decay_loss(self, model):
+        i, loss = 0, 0
+        for layer in model.layers:
+            if hasattr(layer, "weight"):
+                loss += self.decay[i] * torch.sum(layer.weight ** 2) / 2.
+                i += 1
+        return loss
+
     def eval_reward(self, batch):
         self.reward.eval()
 
@@ -153,13 +179,12 @@ class MBPO(SAC):
         next_obs = batch["next_obs"]
 
         with torch.no_grad():
-            next_obs_pred = self.sample_transition_dist(obs, act)
-            
-        obs_mae = torch.abs(next_obs_pred - next_obs).mean()
+            next_obs_pred = self.compute_transition_dist(obs, act).mean
         
-        stats = {
-            "obs_mae": obs_mae.data.item()
-        }
+        obs_mae = torch.abs(next_obs_pred - next_obs.unsqueeze(-2)).mean((0, 2))
+        
+        stats = {f"obs_mae_{i}": obs_mae[i].data.item() for i in range(self.ensemble_dim)}
+        stats["obs_mae"] = obs_mae.mean().data.item()
         return stats
     
     def take_reward_gradient_step(self, batch):
@@ -191,14 +216,90 @@ class MBPO(SAC):
         self.dynamics.eval()
         return stats
 
+    def train_model_epoch(self, logger=None):
+        # train test split
+        num_eval = int(self.eval_ratio * self.real_buffer.size)
+        data = self.real_buffer.sample(self.real_buffer.size)
+        train_data = {k:v[:-num_eval] for k, v in data.items()}
+        eval_data = {k:v[-num_eval:] for k, v in data.items()}
+        
+        best_loss = 1e6
+        epoch_since_last_update = 0
+        for _ in range(self.m_steps):
+            # shuffle train data
+            idx_train = np.arange(len(train_data["obs"]))
+            np.random.shuffle(idx_train)
+
+            train_stats_epoch = []
+            for i in range(0, train_data["obs"].shape[0], self.batch_size):
+                idx_batch = idx_train[i:i+self.batch_size]
+                train_batch = {k:v[idx_batch] for k, v in train_data.items()}
+
+                reward_train_stats = self.take_reward_gradient_step(train_batch)
+                model_train_stats = self.take_model_gradient_step(train_batch)
+
+                train_stats_epoch.append({**reward_train_stats, **model_train_stats})
+            
+            # evaluate
+            reward_eval_stats = self.eval_reward(eval_data)
+            model_eval_stats = self.eval_model(eval_data)
+            
+            # log stats
+            train_stats_epoch = pd.DataFrame(train_stats_epoch).mean(0).to_dict()
+            eval_stats_epoch = {**reward_eval_stats, **model_eval_stats}
+            stats_epoch = {**train_stats_epoch, **eval_stats_epoch}
+            if logger is not None:
+                logger.push(stats_epoch)
+
+            # termination condition based on eval performance
+            current_loss = stats_epoch["rwd_mae"] + stats_epoch["obs_mae"]
+            improvement = (best_loss - current_loss) / best_loss
+            best_loss = min(best_loss, current_loss)
+            if improvement > 0.01:
+                epoch_since_last_update = 0
+            else:
+                epoch_since_last_update += 1
+            
+            if epoch_since_last_update > 5:
+                break
+
+        return stats_epoch
+
+    def train_policy_epoch(self, rwd_fn=None, logger=None):
+        policy_stats_epoch = []
+        for _ in range(self.steps):
+            # mix real and fake data
+            real_batch = self.real_buffer.sample(int(self.real_ratio * self.batch_size))
+            fake_batch = self.replay_buffer.sample(int((1 - self.real_ratio) * self.batch_size))
+            batch = {
+                real_k: torch.cat([real_v, fake_v], dim=0) 
+                for ((real_k, real_v), (fake_k, fake_v)) 
+                in zip(real_batch.items(), fake_batch.items())
+            }
+            policy_stats = self.take_policy_gradient_step(batch, rwd_fn=rwd_fn)
+            policy_stats_epoch.append(policy_stats)
+
+            if logger is not None:
+                logger.push(policy_stats)
+
+        policy_stats_epoch = pd.DataFrame(policy_stats_epoch).mean(0).to_dict()
+        return policy_stats_epoch
+    
     def rollout_dynamics(self, obs, done, rollout_steps):
         """ Rollout dynamics model
+
+        Args:
+            obs (torch.tensor): observations. size=[batch_size, obs_dim]
+            done (torch.tensor): done flag. size=[batch_size, 1]
+            rollout_steps (int): number of rollout steps
+
         Returns:
             data (dict): size=[rollout_steps, batch_size, dim]
         """
         self.reward.eval()
         self.dynamics.eval()
-
+        
+        obs0 = obs.clone()
         obs = obs.clone()
         done = done.clone()
         data = {"obs": [], "act": [], "next_obs": [], "rwd": [], "done": []}
@@ -207,6 +308,10 @@ class MBPO(SAC):
                 act = self.choose_action(obs)
                 rwd = self.compute_reward(obs, act)
                 next_obs = self.sample_transition_dist(obs, act)
+
+            if self.termination_fn is not None:
+                done = self.termination_fn(obs.numpy(), act.numpy(), next_obs.numpy())
+                done = torch.from_numpy(done).view(-1, 1).to(torch.float32)
             
             data["obs"].append(obs)
             data["act"].append(act)
@@ -215,6 +320,11 @@ class MBPO(SAC):
             data["done"].append(done)
             
             obs = next_obs.clone()
+            
+            # # reinit samples
+            # if self.termination_fn is not None:
+            #     idx = torch_dist.Categorical(self.topk_dist).sample((int(done.sum()), ))
+            #     obs[done.flatten() == 1] = obs0[idx]
 
         data["obs"] = torch.stack(data["obs"])
         data["act"] = torch.stack(data["act"])
@@ -223,42 +333,34 @@ class MBPO(SAC):
         data["done"] = torch.stack(data["done"])
         return data
     
-    def train_model_epoch(self, logger):
-        model_stats_epoch = []
-        for _ in range(self.m_steps):
-            train_batch = self.real_buffer.sample(self.batch_size)
-            eval_batch = self.real_buffer.sample(int(self.batch_size * 0.3))
-            reward_train_stats = self.take_reward_gradient_step(train_batch)
-            model_train_stats = self.take_model_gradient_step(train_batch)
-            reward_eval_stats = self.eval_reward(eval_batch)
-            model_eval_stats = self.eval_model(eval_batch)
-            model_stats = {
-                **reward_train_stats, **reward_eval_stats,
-                **model_train_stats, **model_eval_stats
-            }
-            model_stats_epoch.append(model_stats)
-            logger.push(model_stats)
-
-        model_stats_epoch = pd.DataFrame(model_stats_epoch).mean(0).to_dict()
-        return model_stats_epoch
-
-    def train_policy_epoch(self, logger, rwd_fn=None):
-        policy_stats_epoch = []
-        for _ in range(self.steps):
-            # mix real and fake data
-            real_batch = self.real_buffer.sample(self.batch_size)
-            fake_batch = self.replay_buffer.sample(int(self.real_ratio * self.batch_size))
+    def sample_imagined_data(self, batch_size, rollout_steps, mix=True):
+        """ Sample model rollout data and add to replay buffer
+        
+        Args:
+            batch_size (int): rollout batch size
+            rollout_steps (int): model rollout steps
+            mix (bool, optional): whether to mix real and fake initial states
+        """
+        if not mix:
+            batch = self.real_buffer.sample(batch_size)
+        else:
+            real_batch = self.real_buffer.sample(int(batch_size/2))
+            fake_batch = self.replay_buffer.sample(int(batch_size/2))
             batch = {
                 real_k: torch.cat([real_v, fake_v], dim=0) 
                 for ((real_k, real_v), (fake_k, fake_v)) 
                 in zip(real_batch.items(), fake_batch.items())
             }
-            policy_stats = self.take_policy_gradient_step(batch, rwd_fn=rwd_fn)
-            policy_stats_epoch.append(policy_stats)
-            logger.push(policy_stats)
-
-        policy_stats_epoch = pd.DataFrame(policy_stats_epoch).mean(0).to_dict()
-        return policy_stats_epoch
+        
+        rollout_data = self.rollout_dynamics(batch["obs"], batch["done"], rollout_steps)
+        rollout_data = {k: v.flatten(0, 1) for k, v in rollout_data.items()}
+        self.replay_buffer.push_batch(
+            rollout_data["obs"].numpy(),
+            rollout_data["act"].numpy(),
+            rollout_data["rwd"].numpy(),
+            rollout_data["next_obs"].numpy(),
+            rollout_data["done"].numpy()
+        )
     
     def compute_rollout_steps(self, epoch):
         """ Linearly increate rollout steps based on epoch """
@@ -270,6 +372,15 @@ class MBPO(SAC):
             )
         )
         return int(rollout_steps)
+
+    def compute_topk_dist(self, stats):
+        """ Compute top k model selection distribution """
+        maes = [v for k, v in stats.items() if "obs_mae_" in k]
+        idx_topk = np.argsort(maes)[:self.topk]
+        topk_dist = np.zeros(self.ensemble_dim)
+        topk_dist[idx_topk] = 1./self.topk
+        self.topk_dist = torch.from_numpy(topk_dist).to(torch.float32)
+        print("top k dist", self.topk_dist.numpy())
 
     def train_policy(
         self, env, eval_env, max_steps, epochs, steps_per_epoch, update_after, 
@@ -313,29 +424,24 @@ class MBPO(SAC):
 
             # train model
             if (t + 1) >= update_after and (t - update_after + 1) % update_model_every == 0:
-                model_stats_epoch = self.train_model_epoch(logger)
+                model_stats_epoch = self.train_model_epoch(logger=logger)
                 if verbose:
                     round_loss_dict = {k: round(v, 3) for k, v in model_stats_epoch.items()}
                     print(f"e: {epoch + 1}, t model: {t + 1}, {round_loss_dict}")
                 
                 # generate imagined data
+                self.compute_topk_dist(model_stats_epoch)
                 self.replay_buffer.clear()
                 rollout_steps = self.compute_rollout_steps(epoch + 1)
-                real_batch = self.real_buffer.sample(self.rollout_batch_size)
-                rollout_data = self.rollout_dynamics(real_batch["obs"], real_batch["done"], rollout_steps)
-                self.replay_buffer.push_batch(
-                    rollout_data["obs"].flatten(0, 1).numpy(),
-                    rollout_data["act"].flatten(0, 1).numpy(),
-                    rollout_data["rwd"].flatten(0, 1).numpy(),
-                    rollout_data["next_obs"].flatten(0, 1).numpy(),
-                    rollout_data["done"].flatten(0, 1).numpy()
+                self.sample_imagined_data(
+                    self.rollout_batch_size, rollout_steps, mix=False
                 )
-                print("epoch", epoch, "rollout steps", rollout_steps)
+                print("epoch", epoch + 1, "rollout steps", rollout_steps)
 
             # train policy
             if (t + 1) > update_after and (t - update_after + 1) % update_policy_every == 0:
-                policy_stats_epoch = self.train_policy_epoch(logger)
-                if verbose:
+                policy_stats_epoch = self.train_policy_epoch(logger=logger)
+                if (t + 1) % verbose == 0:
                     round_loss_dict = {k: round(v, 3) for k, v in policy_stats_epoch.items()}
                     print(f"e: {epoch + 1}, t policy: {t + 1}, {round_loss_dict}")
 

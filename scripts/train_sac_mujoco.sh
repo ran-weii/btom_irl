@@ -13,14 +13,15 @@ python train_sac_mujoco.py \
 --lr 0.001 \
 --decay 1e-5 \
 --grad_clip 100. \
+--env_name "Hopper-v4" \
 --epochs 200 \
 --max_steps 1000 \
---truncate True \
 --steps_per_epoch 1000 \
 --update_after 2000 \
 --update_every 50 \
 --cp_every 10 \
+--num_eval_eps 5 \
 --verbose True \
 --render False \
---save True \
+--save False \
 --seed 0

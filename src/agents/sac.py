@@ -89,10 +89,10 @@ class SAC(nn.Module):
 
         self.optimizers = {
             "actor": torch.optim.Adam(
-                self.actor.parameters(), lr=lr, weight_decay=decay
+                self.actor.parameters(), lr=lr
             ),
             "critic": torch.optim.Adam(
-                self.critic.parameters(), lr=lr, weight_decay=decay
+                self.critic.parameters(), lr=lr
             )
         }
         
@@ -113,6 +113,16 @@ class SAC(nn.Module):
         act = torch.tanh(act) * self.act_lim
         logp -= ldj.sum(-1, keepdim=True)
         return act, logp
+    
+    def compute_action_likelihood(self, obs, act):
+        eps = 1e-5
+        act_inv = torch.clip(act / self.act_lim, -1. + eps, 1. - eps) # prevent overflow
+        act_inv = torch.atanh(act_inv)
+
+        mu, lv = torch.chunk(self.actor.forward(obs), 2, dim=-1)
+        std = torch.exp(lv.clip(np.log(1e-3), np.log(100)))
+        base_dist = torch_dist.Normal(mu, std)
+        return base_dist.log_prob(act_inv).sum(-1, keepdim=True)
 
     def choose_action(self, obs):
         with torch.no_grad():
@@ -224,13 +234,15 @@ class SAC(nn.Module):
         data["done"] = torch.from_numpy(np.stack(data["done"])).to(torch.float32)
         return data
     
-    def train_policy_epoch(self, logger, rwd_fn=None):
+    def train_policy_epoch(self, rwd_fn=None, logger=None):
         policy_stats_epoch = []
         for _ in range(self.steps):
             batch = self.replay_buffer.sample(self.batch_size)
             policy_stats = self.take_policy_gradient_step(batch, rwd_fn=rwd_fn)
             policy_stats_epoch.append(policy_stats)
-            logger.push(policy_stats)
+
+            if logger is not None:
+                logger.push(policy_stats)
 
         policy_stats_epoch = pd.DataFrame(policy_stats_epoch).mean(0).to_dict()
         return policy_stats_epoch
@@ -276,7 +288,7 @@ class SAC(nn.Module):
 
             # train model
             if (t + 1) > update_after and (t - update_after + 1) % update_every == 0:
-                policy_stats_epoch = self.train_policy_epoch(logger, rwd_fn=rwd_fn)
+                policy_stats_epoch = self.train_policy_epoch(rwd_fn=rwd_fn, logger=logger)
                 if verbose:
                     round_loss_dict = {k: round(v, 3) for k, v in policy_stats_epoch.items()}
                     print(f"e: {epoch + 1}, t: {t + 1}, {round_loss_dict}")

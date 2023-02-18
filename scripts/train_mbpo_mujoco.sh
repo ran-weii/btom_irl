@@ -1,7 +1,7 @@
 #! /bin/bash
 python train_mbpo_mujoco.py \
 --cp_path "none" \
---ensemble_dim 5 \
+--ensemble_dim 7 \
 --hidden_dim 128 \
 --num_hidden 2 \
 --activation relu \
@@ -9,27 +9,31 @@ python train_mbpo_mujoco.py \
 --beta 0.2 \
 --polyak 0.995 \
 --clip_lv False \
---rollout_steps 10 \
---buffer_size 100000 \
+--rwd_clip_max 10. \
+--buffer_size 1000000 \
 --batch_size 200 \
---rollout_batch_size 10000 \
+--rollout_batch_size 100000 \
+--rollout_steps 10 \
+--topk 5 \
 --rollout_min_epoch 20 \
---rollout_max_epoch 100 \
+--rollout_max_epoch 150 \
 --real_ratio 0.05 \
---m_steps 300 \
+--eval_ratio 0.2 \
+--m_steps 10 \
 --a_steps 20 \
 --lr 0.001 \
---decay 1e-5 \
+--decay "0.000025, 0.00005, 0.000075, 0.0001" \
 --grad_clip 100. \
---epochs 200 \
+--env_name "Hopper-v4" \
+--epochs 500 \
 --max_steps 1000 \
---truncate False \
 --steps_per_epoch 1000 \
---update_after 2000 \
+--update_after 5000 \
 --update_model_every 250 \
---update_policy_every 20 \
+--update_policy_every 10 \
 --cp_every 10 \
---verbose True \
+--num_eval_eps 5 \
+--verbose 20 \
 --render False \
---save False \
+--save True \
 --seed 0
