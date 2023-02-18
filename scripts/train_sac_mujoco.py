@@ -29,7 +29,6 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=200, help="training batch size, default=200")
     parser.add_argument("--steps", type=int, default=50, help="training steps per update, default=30")
     parser.add_argument("--lr", type=float, default=0.001, help="learning rate, default=0.001")
-    parser.add_argument("--decay", type=float, default=1e-5, help="weight decay, default=1e-5")
     parser.add_argument("--grad_clip", type=float, default=1000., help="gradient clipping, default=1000.")
     # rollout args
     parser.add_argument("--env_name", type=str, default="Hopper-v4", help="environment name, default=Hopper-v4")
@@ -68,7 +67,7 @@ def main(arglist):
         obs_dim, act_dim, act_lim, arglist["hidden_dim"], arglist["num_hidden"], arglist["activation"],
         gamma=arglist["gamma"], beta=arglist["beta"], polyak=arglist["polyak"],
         buffer_size=arglist["buffer_size"], batch_size=arglist["batch_size"],
-        steps=arglist["steps"], lr=arglist["lr"], decay=arglist["decay"], grad_clip=arglist["grad_clip"], 
+        steps=arglist["steps"], lr=arglist["lr"], grad_clip=arglist["grad_clip"], 
     )
     plot_keys = agent.plot_keys
     

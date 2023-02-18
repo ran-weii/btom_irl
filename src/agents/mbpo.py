@@ -51,7 +51,7 @@ class MBPO(SAC):
         super().__init__(
             obs_dim, act_dim, act_lim, hidden_dim, num_hidden, activation, 
             gamma, beta, polyak, buffer_size, batch_size, a_steps, 
-            lr, decay, grad_clip
+            lr, grad_clip
         )
         self.ensemble_dim = ensemble_dim
         self.clip_lv = clip_lv
