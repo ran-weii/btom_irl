@@ -9,6 +9,7 @@ import torch.distributions as torch_dist
 from src.agents.sac import SAC
 from src.agents.nn_models import MLP, EnsembleMLP
 from src.agents.rl_utils import ReplayBuffer, Logger
+from src.agents.rl_utils import normalize, denormalize
 
 class MBPO(SAC):
     """ Model-based policy optimization """
@@ -98,6 +99,17 @@ class MBPO(SAC):
         self.max_model_lv = nn.Parameter(torch.ones(self.obs_dim) / 2, requires_grad=False)
         self.min_model_lv = nn.Parameter(-torch.ones(self.obs_dim) * 10, requires_grad=False)
 
+        self.obs_mean = nn.Parameter(torch.zeros(self.obs_dim), requires_grad=False)
+        self.obs_variance = nn.Parameter(torch.ones(self.obs_dim), requires_grad=False)
+        self.rwd_mean = nn.Parameter(torch.zeros(1), requires_grad=False)
+        self.rwd_variance = nn.Parameter(torch.ones(1), requires_grad=False)
+    
+    def update_stats(self):
+        self.obs_mean.data = torch.from_numpy(self.real_buffer.obs_mean).to(torch.float32)
+        self.obs_variance.data = torch.from_numpy(self.real_buffer.obs_variance).to(torch.float32)
+        self.rwd_mean.data = torch.from_numpy(self.real_buffer.rwd_mean).to(torch.float32)
+        self.rwd_variance.data = torch.from_numpy(self.real_buffer.rwd_variance).to(torch.float32)
+
     def compute_reward(self, obs, act):
         r = self.reward.forward(torch.cat([obs, act], dim=-1)).clip(-self.rwd_clip_max, self.rwd_clip_max)
         return r
@@ -118,12 +130,13 @@ class MBPO(SAC):
         return self.compute_transition_dist(obs, act).log_prob(next_obs.unsqueeze(-2))
     
     def sample_transition_dist(self, obs, act):
-        next_obs = self.compute_transition_dist(obs, act).rsample()
+        next_obs_dist = self.compute_transition_dist(obs, act)
+        next_obs = next_obs_dist.rsample()
         
         # randomly select from top models
         ensemble_idx = torch_dist.Categorical(self.topk_dist).sample(obs.shape[:-1]).unsqueeze(-1)
-        ensemble_idx = ensemble_idx.unsqueeze(-1).repeat_interleave(obs.shape[-1], dim=-1) # duplicate alone feature dim
-        next_obs = torch.gather(next_obs, -2, ensemble_idx).squeeze(-2)
+        ensemble_idx_ = ensemble_idx.unsqueeze(-1).repeat_interleave(obs.shape[-1], dim=-1) # duplicate alone feature dim
+        next_obs = torch.gather(next_obs, -2, ensemble_idx_).squeeze(-2)
         return next_obs
 
     def compute_reward_loss(self, batch):
@@ -216,16 +229,23 @@ class MBPO(SAC):
         self.dynamics.eval()
         return stats
 
-    def train_model_epoch(self, logger=None):
+    def train_model_epoch(self, steps, logger=None, verbose=False):
         # train test split
         num_eval = int(self.eval_ratio * self.real_buffer.size)
         data = self.real_buffer.sample(self.real_buffer.size)
+
+        # normalize data
+        data["obs"] = normalize(data["obs"], self.obs_mean, self.obs_variance)
+        data["next_obs"] = normalize(data["next_obs"], self.obs_mean, self.obs_variance)
+        data["rwd"] = normalize(data["rwd"], self.rwd_mean, self.rwd_variance)
+
         train_data = {k:v[:-num_eval] for k, v in data.items()}
         eval_data = {k:v[-num_eval:] for k, v in data.items()}
         
         best_loss = 1e6
         epoch_since_last_update = 0
-        for _ in range(self.m_steps):
+        stats_epoch = {f"obs_mae_{i}": 1e6 for i in range(self.ensemble_dim)}
+        for e in range(steps):
             # shuffle train data
             idx_train = np.arange(len(train_data["obs"]))
             np.random.shuffle(idx_train)
@@ -262,6 +282,9 @@ class MBPO(SAC):
             
             if epoch_since_last_update > 5:
                 break
+
+            if verbose:
+                print("e", e + 1, {k: round(v, 4) for k, v in stats_epoch.items()})
 
         return stats_epoch
 
@@ -306,8 +329,13 @@ class MBPO(SAC):
         for t in range(rollout_steps):
             with torch.no_grad():
                 act = self.choose_action(obs)
-                rwd = self.compute_reward(obs, act)
-                next_obs = self.sample_transition_dist(obs, act)
+
+                obs_norm = normalize(obs, self.obs_mean, self.obs_variance)
+                rwd_norm = self.compute_reward(obs_norm, act)
+                next_obs_norm = self.sample_transition_dist(obs_norm, act)
+
+                rwd = denormalize(rwd_norm, self.rwd_mean, self.rwd_variance)
+                next_obs = denormalize(next_obs_norm, self.obs_mean, self.obs_variance)
 
             if self.termination_fn is not None:
                 done = self.termination_fn(obs.numpy(), act.numpy(), next_obs.numpy())
@@ -424,19 +452,20 @@ class MBPO(SAC):
 
             # train model
             if (t + 1) >= update_after and (t - update_after + 1) % update_model_every == 0:
-                model_stats_epoch = self.train_model_epoch(logger=logger)
+                self.update_stats()                
+                model_stats_epoch = self.train_model_epoch(self.m_steps, logger=logger)
+                self.compute_topk_dist(model_stats_epoch)
                 if verbose:
                     round_loss_dict = {k: round(v, 3) for k, v in model_stats_epoch.items()}
                     print(f"e: {epoch + 1}, t model: {t + 1}, {round_loss_dict}")
                 
                 # generate imagined data
-                self.compute_topk_dist(model_stats_epoch)
                 self.replay_buffer.clear()
                 rollout_steps = self.compute_rollout_steps(epoch + 1)
                 self.sample_imagined_data(
                     self.rollout_batch_size, rollout_steps, mix=False
                 )
-                print("epoch", epoch + 1, "rollout steps", rollout_steps)
+                print("epoch", epoch + 1, "buffer size", self.real_buffer.size, "rollout steps", rollout_steps)
 
             # train policy
             if (t + 1) > update_after and (t - update_after + 1) % update_policy_every == 0:
