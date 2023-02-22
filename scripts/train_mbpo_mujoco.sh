@@ -10,6 +10,7 @@ python train_mbpo_mujoco.py \
 --polyak 0.995 \
 --clip_lv False \
 --rwd_clip_max 10. \
+--norm_obs True \
 --buffer_size 1000000 \
 --batch_size 200 \
 --rollout_batch_size 100000 \
@@ -35,5 +36,5 @@ python train_mbpo_mujoco.py \
 --num_eval_eps 5 \
 --verbose 20 \
 --render False \
---save True \
+--save False \
 --seed 0

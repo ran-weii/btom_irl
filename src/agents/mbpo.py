@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import torch.distributions as torch_dist
 
 from src.agents.sac import SAC
-from src.agents.nn_models import MLP, EnsembleMLP
+from src.agents.nn_models import EnsembleMLP
 from src.agents.rl_utils import ReplayBuffer, Logger
 from src.agents.rl_utils import normalize, denormalize
 
@@ -15,7 +15,7 @@ class MBPO(SAC):
     """ Model-based policy optimization """
     def __init__(
         self, obs_dim, act_dim, act_lim, ensemble_dim, hidden_dim, num_hidden, activation, 
-        gamma=0.9, beta=0.2, polyak=0.995, clip_lv=False, rwd_clip_max=10., buffer_size=1e6, batch_size=200, 
+        gamma=0.9, beta=0.2, polyak=0.995, clip_lv=False, rwd_clip_max=10., norm_obs=False, buffer_size=1e6, batch_size=200, 
         rollout_batch_size=10000, rollout_steps=10, topk=5, rollout_min_epoch=20, rollout_max_epoch=100, 
         termination_fn=None, real_ratio=0.05, eval_ratio=0.2, m_steps=100, a_steps=50, lr=0.001, decay=None, grad_clip=None
         ):
@@ -33,6 +33,7 @@ class MBPO(SAC):
             polyak (float, optional): target network polyak averaging factor. Default=0.995
             clip_lv (bool, optional): whether to soft clip observation log variance. Default=False
             rwd_clip_max (float, optional): clip reward max value. Default=10.
+            norm_obs (bool, optional): whether to normalize observation. Default=False
             buffer_size (int, optional): replay buffer size. Default=1e6
             batch_size (int, optional): actor and critic batch size. Default=100
             rollout_batch_size (int, optional): model_rollout batch size. Default=10000
@@ -57,6 +58,7 @@ class MBPO(SAC):
         self.ensemble_dim = ensemble_dim
         self.clip_lv = clip_lv
         self.rwd_clip_max = rwd_clip_max
+        self.norm_obs = norm_obs
         
         self.rollout_batch_size = rollout_batch_size
         self.rollout_steps = rollout_steps
@@ -69,8 +71,8 @@ class MBPO(SAC):
         self.eval_ratio = eval_ratio
         self.m_steps = m_steps
 
-        self.reward = MLP(
-            obs_dim + act_dim, 1, hidden_dim, num_hidden, activation
+        self.reward = EnsembleMLP(
+            obs_dim + act_dim, 2, ensemble_dim, hidden_dim, num_hidden, activation
         )
         self.dynamics = EnsembleMLP(
             obs_dim + act_dim, obs_dim * 2, ensemble_dim, hidden_dim, num_hidden, activation
@@ -89,7 +91,7 @@ class MBPO(SAC):
         )
         
         # buffer to store environment data
-        self.real_buffer = ReplayBuffer(obs_dim, act_dim, buffer_size, momentum=0.9)
+        self.real_buffer = ReplayBuffer(obs_dim, act_dim, buffer_size, momentum=0.)
 
         self.plot_keys = [
             "eval_eps_return_avg", "eval_eps_len_avg", "critic_loss_avg", 
@@ -109,17 +111,38 @@ class MBPO(SAC):
         self.obs_variance.data = torch.from_numpy(self.real_buffer.obs_variance).to(torch.float32)
         self.rwd_mean.data = torch.from_numpy(self.real_buffer.rwd_mean).to(torch.float32)
         self.rwd_variance.data = torch.from_numpy(self.real_buffer.rwd_variance).to(torch.float32)
-
-    def compute_reward(self, obs, act):
-        r = self.reward.forward(torch.cat([obs, act], dim=-1)).clip(-self.rwd_clip_max, self.rwd_clip_max)
-        return r
     
+    def compute_reward_dist(self, obs, act):
+        obs_act = torch.cat([obs, act], dim=-1)
+        mu_, lv = torch.chunk(self.reward.forward(obs_act), 2, dim=-1)
+        mu = mu_.clip(-self.rwd_clip_max, self.rwd_clip_max)
+
+        if not self.clip_lv:
+            std = torch.exp(lv.clip(np.log(1e-5), np.log(3)))
+        else:
+            lv = self.max_model_lv - F.softplus(self.max_model_lv[0] - lv)
+            lv = self.min_model_lv + F.softplus(lv - self.min_model_lv[0])
+            std = torch.exp(lv)
+        return torch_dist.Normal(mu, std)
+    
+    def compute_reward_log_prob(self, obs, act, rwd):
+        return self.compute_reward_dist(obs, act).log_prob(rwd.unsqueeze(-2))
+    
+    def sample_reward_dist(self, obs, act):
+        rwd_dist = self.compute_reward_dist(obs, act)
+        rwd = rwd_dist.rsample()
+        
+        # randomly select from top models
+        ensemble_idx = torch_dist.Categorical(torch.ones_like(self.topk_dist)).sample(obs.shape[:-1]).unsqueeze(-1).unsqueeze(-1)
+        rwd = torch.gather(rwd, -2, ensemble_idx).squeeze(-2)
+        return rwd
+
     def compute_transition_dist(self, obs, act):
         obs_act = torch.cat([obs, act], dim=-1)
         mu, lv = torch.chunk(self.dynamics.forward(obs_act), 2, dim=-1)
 
         if not self.clip_lv:
-            std = torch.exp(lv.clip(np.log(1e-3), np.log(3)))
+            std = torch.exp(lv.clip(np.log(1e-5), np.log(3)))
         else:
             lv = self.max_model_lv - F.softplus(self.max_model_lv - lv)
             lv = self.min_model_lv + F.softplus(lv - self.min_model_lv)
@@ -143,10 +166,10 @@ class MBPO(SAC):
         obs = batch["obs"]
         act = batch["act"]
         r = batch["rwd"]
-
-        r_pred = self.compute_reward(obs, act)
+        
+        logp = self.compute_reward_log_prob(obs, act, r).sum(-1)
         decay_loss = self.compute_decay_loss(self.reward)
-        loss = torch.pow(r_pred - r, 2).mean() + decay_loss
+        loss = -logp.mean() + decay_loss
         return loss
 
     def compute_dynamics_loss(self, batch):
@@ -175,9 +198,9 @@ class MBPO(SAC):
         rwd = batch["rwd"]
         
         with torch.no_grad():
-            rwd_pred = self.compute_reward(obs, act)
+            rwd_pred = self.compute_reward_dist(obs, act).mean
         
-        rwd_mae = torch.abs(rwd_pred - rwd).mean()
+        rwd_mae = torch.abs(rwd_pred - rwd.unsqueeze(-2)).mean()
         
         stats = {
             "rwd_mae": rwd_mae.data.item()
@@ -331,7 +354,7 @@ class MBPO(SAC):
                 act = self.choose_action(obs)
 
                 obs_norm = normalize(obs, self.obs_mean, self.obs_variance)
-                rwd_norm = self.compute_reward(obs_norm, act)
+                rwd_norm = self.sample_reward_dist(obs_norm, act)
                 next_obs_norm = self.sample_transition_dist(obs_norm, act)
 
                 rwd = denormalize(rwd_norm, self.rwd_mean, self.rwd_variance)
@@ -452,7 +475,8 @@ class MBPO(SAC):
 
             # train model
             if (t + 1) >= update_after and (t - update_after + 1) % update_model_every == 0:
-                self.update_stats()                
+                if self.norm_obs:
+                    self.update_stats()
                 model_stats_epoch = self.train_model_epoch(self.m_steps, logger=logger)
                 self.compute_topk_dist(model_stats_epoch)
                 if verbose:
@@ -465,7 +489,7 @@ class MBPO(SAC):
                 self.sample_imagined_data(
                     self.rollout_batch_size, rollout_steps, mix=False
                 )
-                print("epoch", epoch + 1, "buffer size", self.real_buffer.size, "rollout steps", rollout_steps)
+                print("epoch", epoch + 1, "real buffer size", self.real_buffer.size, "rollout steps", rollout_steps)
 
             # train policy
             if (t + 1) > update_after and (t - update_after + 1) % update_policy_every == 0:
