@@ -36,6 +36,10 @@ def update_moving_stats(x, old_mean, old_mean_square, old_variance, size, moment
     new_mean = (old_mean * size + np.sum(x, axis=0)) / (size + batch_size)
     new_mean_square = (old_mean_square * size + np.sum(x**2, axis=0)) / (size + batch_size)
     new_variance = new_mean_square - new_mean**2
+    
+    # print(old_mean, size)
+    # print(x.mean(0))
+    # print("new mean", new_mean)
 
     new_mean = old_mean * momentum + new_mean * (1 - momentum)
     new_mean_square = old_mean_square * momentum + new_mean_square * (1 - momentum)
@@ -138,8 +142,8 @@ class ReplayBuffer:
         self.next_obs = np.concatenate([self.next_obs, next_obs.reshape(-1, self.obs_dim)], axis=0)
         self.done = np.concatenate([self.done, done.reshape(-1, 1)], axis=0)
 
-        self.size += batch_size
         self.update_stats(obs, rwd)
+        self.size += batch_size
 
         if self.size > self.max_size:
             size_diff = self.size - self.max_size

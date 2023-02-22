@@ -30,6 +30,7 @@ def parse_args():
     parser.add_argument("--polyak", type=float, default=0.995, help="polyak averaging factor, default=0.995")
     parser.add_argument("--clip_lv", type=bool_, default=False, help="whether to clip observation variance, default=False")
     parser.add_argument("--rwd_clip_max", type=float, default=10., help="clip reward max value, default=10.")
+    parser.add_argument("--norm_obs", type=bool_, default=False, help="whether to normalize observation, default=False")
     # training args
     parser.add_argument("--buffer_size", type=int, default=1e6, help="replay buffer size, default=1e6")
     parser.add_argument("--batch_size", type=int, default=200, help="training batch size, default=200")
@@ -85,8 +86,9 @@ def main(arglist):
         obs_dim, act_dim, act_lim, 
         arglist["ensemble_dim"], arglist["hidden_dim"], arglist["num_hidden"], arglist["activation"],
         gamma=arglist["gamma"], beta=arglist["beta"], polyak=arglist["polyak"], clip_lv=arglist["clip_lv"], 
-        rwd_clip_max=arglist["rwd_clip_max"], buffer_size=arglist["buffer_size"], batch_size=arglist["batch_size"], 
-        rollout_steps=arglist["rollout_steps"], rollout_batch_size=arglist["rollout_batch_size"], topk=arglist["topk"],
+        rwd_clip_max=arglist["rwd_clip_max"], norm_obs=arglist["norm_obs"], buffer_size=arglist["buffer_size"], 
+        batch_size=arglist["batch_size"], rollout_steps=arglist["rollout_steps"], 
+        rollout_batch_size=arglist["rollout_batch_size"], topk=arglist["topk"],
         rollout_min_epoch=arglist["rollout_min_epoch"], rollout_max_epoch=arglist["rollout_max_epoch"], 
         termination_fn=termination_fn, real_ratio=arglist["real_ratio"], eval_ratio=arglist["eval_ratio"], 
         m_steps=arglist["m_steps"], a_steps=arglist["a_steps"], lr=arglist["lr"], decay=arglist["decay"], grad_clip=arglist["grad_clip"], 
