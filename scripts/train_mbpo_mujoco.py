@@ -71,7 +71,7 @@ def parse_args():
 def main(arglist):
     np.random.seed(arglist["seed"])
     torch.manual_seed(arglist["seed"])
-    print(f"training sac with settings: {arglist}")
+    print(f"training mbpo with settings: {arglist}")
     
     render_mode = "human" if arglist["render"] else None
     env = gym.make(
