@@ -24,11 +24,13 @@ def parse_args():
     parser.add_argument("--gamma", type=float, default=0.99, help="trainer discount factor, default=0.9")
     parser.add_argument("--beta", type=float, default=0.2, help="softmax temperature, default=0.1")
     parser.add_argument("--polyak", type=float, default=0.995, help="polyak averaging factor, default=0.995")
+    parser.add_argument("--tune_beta", type=bool_, default=True, help="whether to tune beta, default=True")
     # training args
     parser.add_argument("--buffer_size", type=int, default=1e6, help="replay buffer size, default=1e6")
     parser.add_argument("--batch_size", type=int, default=200, help="training batch size, default=200")
     parser.add_argument("--steps", type=int, default=50, help="training steps per update, default=30")
-    parser.add_argument("--lr", type=float, default=0.001, help="learning rate, default=0.001")
+    parser.add_argument("--lr_a", type=float, default=0.001, help="actor learning rate, default=0.001")
+    parser.add_argument("--lr_c", type=float, default=0.001, help="critic learning rate, default=0.001")
     parser.add_argument("--grad_clip", type=float, default=1000., help="gradient clipping, default=1000.")
     # rollout args
     parser.add_argument("--env_name", type=str, default="Hopper-v4", help="environment name, default=Hopper-v4")
@@ -64,10 +66,22 @@ def main(arglist):
     act_lim = torch.from_numpy(env.action_space.high).to(torch.float32)
     
     agent = SAC(
-        obs_dim, act_dim, act_lim, arglist["hidden_dim"], arglist["num_hidden"], arglist["activation"],
-        gamma=arglist["gamma"], beta=arglist["beta"], polyak=arglist["polyak"],
-        buffer_size=arglist["buffer_size"], batch_size=arglist["batch_size"],
-        steps=arglist["steps"], lr=arglist["lr"], grad_clip=arglist["grad_clip"], 
+        obs_dim, 
+        act_dim, 
+        act_lim, 
+        arglist["hidden_dim"], 
+        arglist["num_hidden"], 
+        arglist["activation"],
+        gamma=arglist["gamma"], 
+        beta=arglist["beta"], 
+        polyak=arglist["polyak"], 
+        tune_beta=arglist["tune_beta"],
+        buffer_size=arglist["buffer_size"], 
+        batch_size=arglist["batch_size"],
+        steps=arglist["steps"], 
+        lr_a=arglist["lr_a"], 
+        lr_c=arglist["lr_c"], 
+        grad_clip=arglist["grad_clip"], 
     )
     plot_keys = agent.plot_keys
     

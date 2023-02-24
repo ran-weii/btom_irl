@@ -8,6 +8,7 @@ python train_mbpo_mujoco.py \
 --gamma 0.99 \
 --beta 0.2 \
 --polyak 0.995 \
+--tune_beta True \
 --clip_lv False \
 --rwd_clip_max 10. \
 --norm_obs True \
@@ -22,7 +23,9 @@ python train_mbpo_mujoco.py \
 --eval_ratio 0.2 \
 --m_steps 10 \
 --a_steps 20 \
---lr 0.001 \
+--lr_a 0.001 \
+--lr_c 0.001 \
+--lr_m 0.001 \
 --decay "0.000025, 0.00005, 0.000075, 0.0001" \
 --grad_clip 100. \
 --env_name "Hopper-v4" \

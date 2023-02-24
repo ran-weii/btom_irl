@@ -28,6 +28,7 @@ def parse_args():
     parser.add_argument("--gamma", type=float, default=0.99, help="trainer discount factor, default=0.9")
     parser.add_argument("--beta", type=float, default=0.2, help="softmax temperature, default=0.1")
     parser.add_argument("--polyak", type=float, default=0.995, help="polyak averaging factor, default=0.995")
+    parser.add_argument("--tune_beta", type=bool_, default=True, help="whether to tune beta, default=True")
     parser.add_argument("--clip_lv", type=bool_, default=False, help="whether to clip observation variance, default=False")
     parser.add_argument("--rwd_clip_max", type=float, default=10., help="clip reward max value, default=10.")
     parser.add_argument("--norm_obs", type=bool_, default=False, help="whether to normalize observation, default=False")
@@ -43,7 +44,9 @@ def parse_args():
     parser.add_argument("--eval_ratio", type=float, default=0.2, help="ratio of real samples for model evaluation, default=0.2")
     parser.add_argument("--m_steps", type=int, default=100, help="model training steps per update, default=100")
     parser.add_argument("--a_steps", type=int, default=50, help="policy training steps per update, default=50")
-    parser.add_argument("--lr", type=float, default=0.001, help="learning rate, default=0.001")
+    parser.add_argument("--lr_a", type=float, default=0.001, help="actor learning rate, default=0.001")
+    parser.add_argument("--lr_c", type=float, default=0.001, help="critic learning rate, default=0.001")
+    parser.add_argument("--lr_m", type=float, default=0.001, help="model learning rate, default=0.001")
     parser.add_argument("--decay", type=list_, default=[0.000025, 0.00005, 0.000075, 0.0001], 
         help="weight decay for each layer, default=[0.000025, 0.00005, 0.000075, 0.0001]")
     parser.add_argument("--grad_clip", type=float, default=1000., help="gradient clipping, default=1000.")
@@ -68,7 +71,7 @@ def parse_args():
 def main(arglist):
     np.random.seed(arglist["seed"])
     torch.manual_seed(arglist["seed"])
-    print(f"training sac with settings: {arglist}")
+    print(f"training mbpo with settings: {arglist}")
     
     render_mode = "human" if arglist["render"] else None
     env = gym.make(
@@ -83,15 +86,37 @@ def main(arglist):
     termination_fn = get_termination_fn(arglist["env_name"])
 
     agent = MBPO(
-        obs_dim, act_dim, act_lim, 
-        arglist["ensemble_dim"], arglist["hidden_dim"], arglist["num_hidden"], arglist["activation"],
-        gamma=arglist["gamma"], beta=arglist["beta"], polyak=arglist["polyak"], clip_lv=arglist["clip_lv"], 
-        rwd_clip_max=arglist["rwd_clip_max"], norm_obs=arglist["norm_obs"], buffer_size=arglist["buffer_size"], 
-        batch_size=arglist["batch_size"], rollout_steps=arglist["rollout_steps"], 
-        rollout_batch_size=arglist["rollout_batch_size"], topk=arglist["topk"],
-        rollout_min_epoch=arglist["rollout_min_epoch"], rollout_max_epoch=arglist["rollout_max_epoch"], 
-        termination_fn=termination_fn, real_ratio=arglist["real_ratio"], eval_ratio=arglist["eval_ratio"], 
-        m_steps=arglist["m_steps"], a_steps=arglist["a_steps"], lr=arglist["lr"], decay=arglist["decay"], grad_clip=arglist["grad_clip"], 
+        obs_dim, 
+        act_dim, 
+        act_lim, 
+        arglist["ensemble_dim"], 
+        arglist["hidden_dim"], 
+        arglist["num_hidden"], 
+        arglist["activation"],
+        gamma=arglist["gamma"], 
+        beta=arglist["beta"], 
+        polyak=arglist["polyak"], 
+        tune_beta=arglist["tune_beta"], 
+        clip_lv=arglist["clip_lv"], 
+        rwd_clip_max=arglist["rwd_clip_max"], 
+        norm_obs=arglist["norm_obs"], 
+        buffer_size=arglist["buffer_size"], 
+        batch_size=arglist["batch_size"], 
+        rollout_steps=arglist["rollout_steps"], 
+        rollout_batch_size=arglist["rollout_batch_size"], 
+        topk=arglist["topk"],
+        rollout_min_epoch=arglist["rollout_min_epoch"], 
+        rollout_max_epoch=arglist["rollout_max_epoch"], 
+        termination_fn=termination_fn, 
+        real_ratio=arglist["real_ratio"], 
+        eval_ratio=arglist["eval_ratio"], 
+        m_steps=arglist["m_steps"], 
+        a_steps=arglist["a_steps"], 
+        lr_a=arglist["lr_a"], 
+        lr_c=arglist["lr_c"], 
+        lr_m=arglist["lr_m"], 
+        decay=arglist["decay"], 
+        grad_clip=arglist["grad_clip"], 
     )
     plot_keys = agent.plot_keys
     
