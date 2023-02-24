@@ -7,13 +7,15 @@ python train_sac_mujoco.py \
 --gamma 0.99 \
 --beta 0.2 \
 --polyak 0.995 \
+--tune_beta True \
 --buffer_size 1000000 \
 --batch_size 200 \
 --steps 50 \
---lr 0.001 \
+--lr_a 0.001 \
+--lr_c 0.001 \
 --grad_clip 100. \
 --env_name "Hopper-v4" \
---epochs 200 \
+--epochs 1000 \
 --max_steps 1000 \
 --steps_per_epoch 1000 \
 --update_after 2000 \

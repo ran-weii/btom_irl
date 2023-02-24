@@ -40,9 +40,23 @@ class TanhTransform(torch_transform.Transform):
 class SAC(nn.Module):
     """ Soft actor critic """
     def __init__(
-        self, obs_dim, act_dim, act_lim, hidden_dim, num_hidden, activation, 
-        gamma=0.9, beta=0.2, polyak=0.995, buffer_size=int(1e6), 
-        batch_size=100, steps=50, lr=1e-3, grad_clip=None
+        self, 
+        obs_dim, 
+        act_dim, 
+        act_lim, 
+        hidden_dim, 
+        num_hidden, 
+        activation, 
+        gamma=0.9, 
+        beta=0.2, 
+        polyak=0.995, 
+        tune_beta=True, 
+        buffer_size=int(1e6), 
+        batch_size=100, 
+        steps=50, 
+        lr_a=1e-3, 
+        lr_c=1e-3, 
+        grad_clip=None
         ):
         """
         Args:
@@ -55,10 +69,12 @@ class SAC(nn.Module):
             gamma (float, optional): discount factor. Default=0.9
             beta (float, optional): softmax temperature. Default=0.2
             polyak (float, optional): target network polyak averaging factor. Default=0.995
+            tune_beta (bool, optional): whether to automatically tune temperature. Default=True
             buffer_size (int, optional): replay buffer size. Default=1e6
             batch_size (int, optional): actor and critic batch size. Default=100
             steps (int, optional): actor critic update steps per training step. Default=50
-            lr (float, optional): learning rate. Default=1e-3
+            lr_a (float, optional): actor learning rate. Default=1e-3
+            lr_c (float, optional): critic learning rate. Default=1e-3
             grad_clip (float, optional): gradient clipping. Default=None
         """
         super().__init__()
@@ -68,13 +84,17 @@ class SAC(nn.Module):
         self.gamma = gamma
         self.beta = beta
         self.polyak = polyak
-    
+        self.tune_beta = tune_beta
+        self.beta_target = -act_dim # default temperature target
+        
         self.buffer_size = buffer_size
         self.batch_size = batch_size
         self.steps = steps
-        self.lr = lr
+        self.lr_a = lr_a
+        self.lr_c = lr_c
         self.grad_clip = grad_clip
         
+        self.log_beta = nn.Parameter(np.log(beta) * torch.ones(1), requires_grad=tune_beta)
         self.actor = MLP(obs_dim, act_dim * 2, hidden_dim, num_hidden, activation)
         self.critic = DoubleQNetwork(
             obs_dim, act_dim, hidden_dim, num_hidden, activation
@@ -87,16 +107,19 @@ class SAC(nn.Module):
 
         self.optimizers = {
             "actor": torch.optim.Adam(
-                self.actor.parameters(), lr=lr
+                self.actor.parameters(), lr=lr_a
             ),
             "critic": torch.optim.Adam(
-                self.critic.parameters(), lr=lr
+                self.critic.parameters(), lr=lr_c
+            ),
+            "beta": torch.optim.Adam(
+                [self.log_beta], lr=lr_a
             )
         }
         
         self.replay_buffer = ReplayBuffer(obs_dim, act_dim, buffer_size, momentum=0.99)
         
-        self.plot_keys = ["eval_eps_return_avg", "eval_eps_len_avg", "critic_loss_avg", "actor_loss_avg"]
+        self.plot_keys = ["eval_eps_return_avg", "eval_eps_len_avg", "critic_loss_avg", "actor_loss_avg", "beta_avg"]
     
     def sample_action(self, obs):
         mu, lv = torch.chunk(self.actor.forward(obs), 2, dim=-1)
@@ -162,7 +185,8 @@ class SAC(nn.Module):
         q = torch.min(q1, q2)
 
         a_loss = torch.mean(self.beta * logp - q)
-        return a_loss
+        beta_loss = -torch.mean(self.log_beta * (logp + self.beta_target).detach())
+        return a_loss, beta_loss
 
     def take_policy_gradient_step(self, batch, rwd_fn=None):
         self.actor.train()
@@ -178,25 +202,34 @@ class SAC(nn.Module):
         self.optimizers["actor"].zero_grad()
 
         # train actor
-        actor_loss = self.compute_actor_loss(batch)
+        actor_loss, beta_loss = self.compute_actor_loss(batch)
         actor_loss.backward()
+        if self.tune_beta:
+            beta_loss.backward()
+        
         if self.grad_clip is not None:
             nn.utils.clip_grad_norm_(self.actor.parameters(), self.grad_clip)
         self.optimizers["actor"].step()
+        self.optimizers["beta"].step()
         self.optimizers["actor"].zero_grad()
+        self.optimizers["beta"].zero_grad()
         self.optimizers["critic"].zero_grad()
         
-        # update target networks
+        # update target networks and temperature
         with torch.no_grad():
             for p, p_target in zip(
                 self.critic.parameters(), self.critic_target.parameters()
             ):
                 p_target.data.mul_(self.polyak)
                 p_target.data.add_((1 - self.polyak) * p.data)
+            
+            self.beta = self.log_beta.exp().data
 
         stats = {
             "actor_loss": actor_loss.data.item(),
             "critic_loss": critic_loss.data.item(),
+            "beta_loss": beta_loss.data.item(),
+            "beta": self.beta,
         }
         
         self.actor.eval()
