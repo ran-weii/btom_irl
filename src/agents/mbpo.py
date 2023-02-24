@@ -14,10 +14,38 @@ from src.agents.rl_utils import normalize, denormalize
 class MBPO(SAC):
     """ Model-based policy optimization """
     def __init__(
-        self, obs_dim, act_dim, act_lim, ensemble_dim, hidden_dim, num_hidden, activation, 
-        gamma=0.9, beta=0.2, polyak=0.995, clip_lv=False, rwd_clip_max=10., norm_obs=False, buffer_size=1e6, batch_size=200, 
-        rollout_batch_size=10000, rollout_steps=10, topk=5, rollout_min_epoch=20, rollout_max_epoch=100, 
-        termination_fn=None, real_ratio=0.05, eval_ratio=0.2, m_steps=100, a_steps=50, lr=0.001, decay=None, grad_clip=None
+        self, 
+        obs_dim, 
+        act_dim, 
+        act_lim, 
+        ensemble_dim, 
+        hidden_dim, 
+        num_hidden, 
+        activation, 
+        gamma=0.9, 
+        beta=0.2, 
+        polyak=0.995, 
+        tune_beta=True, 
+        clip_lv=False, 
+        rwd_clip_max=10., 
+        norm_obs=False, 
+        buffer_size=1e6, 
+        batch_size=200, 
+        rollout_batch_size=10000, 
+        rollout_steps=10, 
+        topk=5, 
+        rollout_min_epoch=20, 
+        rollout_max_epoch=100, 
+        termination_fn=None, 
+        real_ratio=0.05, 
+        eval_ratio=0.2, 
+        m_steps=100, 
+        a_steps=50, 
+        lr_a=0.001, 
+        lr_c=0.001, 
+        lr_m=0.001, 
+        decay=None, 
+        grad_clip=None
         ):
         """
         Args:
@@ -31,6 +59,7 @@ class MBPO(SAC):
             gamma (float, optional): discount factor. Default=0.9
             beta (float, optional): softmax temperature. Default=0.2
             polyak (float, optional): target network polyak averaging factor. Default=0.995
+            tune_beta (bool, optional): whether to automatically tune temperature. Default=True
             clip_lv (bool, optional): whether to soft clip observation log variance. Default=False
             rwd_clip_max (float, optional): clip reward max value. Default=10.
             norm_obs (bool, optional): whether to normalize observation. Default=False
@@ -46,14 +75,16 @@ class MBPO(SAC):
             eval_ratio (float, optional): ratio of real samples for model evaluation. Default=0.2
             m_steps (int, optional): model update steps per training step. Default=100
             a_steps (int, optional): policy update steps per training step. Default=50
-            lr (float, optional): learning rate. Default=1e-3
+            lr_a (float, optional): actor learning rate. Default=1e-3
+            lr_c (float, optional): critic learning rate. Default=1e-3
+            lr_m (float, optional): model learning rate. Default=1e-3
             decay ([list, None], optional): weight decay for each dynamics and reward model layer. Default=None.
             grad_clip (float, optional): gradient clipping. Default=None
         """
         super().__init__(
             obs_dim, act_dim, act_lim, hidden_dim, num_hidden, activation, 
-            gamma, beta, polyak, buffer_size, batch_size, a_steps, 
-            lr, grad_clip
+            gamma, beta, polyak, tune_beta, buffer_size, batch_size, a_steps, 
+            lr_a, lr_c, grad_clip
         )
         self.ensemble_dim = ensemble_dim
         self.clip_lv = clip_lv
@@ -84,10 +115,10 @@ class MBPO(SAC):
             self.decay = [0. for l in self.dynamics.layers if hasattr(l, "weight")]
         
         self.optimizers["reward"] = torch.optim.Adam(
-            self.reward.parameters(), lr=lr
+            self.reward.parameters(), lr=lr_m
         )
         self.optimizers["dynamics"] = torch.optim.Adam(
-            self.dynamics.parameters(), lr=lr, 
+            self.dynamics.parameters(), lr=lr_m, 
         )
         
         # buffer to store environment data
