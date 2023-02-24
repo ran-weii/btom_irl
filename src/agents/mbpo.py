@@ -126,7 +126,7 @@ class MBPO(SAC):
 
         self.plot_keys = [
             "eval_eps_return_avg", "eval_eps_len_avg", "critic_loss_avg", 
-            "actor_loss_avg", "rwd_mae_avg", "obs_mae_avg"
+            "actor_loss_avg", "beta_avg", "rwd_mae_avg", "obs_mae_avg"
         ]
 
         self.max_model_lv = nn.Parameter(torch.ones(self.obs_dim) / 2, requires_grad=False)
