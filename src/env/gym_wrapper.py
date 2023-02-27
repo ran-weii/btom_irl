@@ -4,20 +4,23 @@ from src.agents.rl_utils import normalize, denormalize
 
 class GymEnv(gym.Env):
     """ Gym wrapper with normalization """
-    def __init__(self, env_name, obs_mean=0., obs_std=1., **kwargs):
+    def __init__(self, env_name, obs_mean=0., obs_variance=1., rwd_mean=0., rwd_variance=1., **kwargs):
         self.env = gym.make(env_name, **kwargs)
 
         self.obs_mean = obs_mean
-        self.obs_std = obs_std
+        self.obs_variance = obs_variance
+
+        self.rwd_mean = rwd_mean
+        self.rwd_variance = rwd_variance
 
     def reset(self):
         obs, info = self.env.reset()
-        obs = normalize(obs.copy(), self.obs_mean, self.obs_std)
+        obs = normalize(obs.copy(), self.obs_mean, self.obs_variance)
         return obs, info
 
     def step(self, act):
         next_obs, r, done, truncated, info = self.env.step(act)
-        next_obs = normalize(next_obs.copy(), self.obs_mean, self.obs_std)
+        next_obs = normalize(next_obs.copy(), self.obs_mean, self.obs_variance)
         return next_obs, r, done, truncated, info
 
     def close(self):
