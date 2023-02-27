@@ -42,7 +42,8 @@ class RAMBO(MBPO):
         lr_c=3e-4, 
         lr_m=3e-4, 
         decay=0, 
-        grad_clip=None
+        grad_clip=None,
+        device=torch.device("cpu")
         ):
         """
         Args:
@@ -77,12 +78,13 @@ class RAMBO(MBPO):
             lr_m (float, optional): model learning rate. Default=3e-4
             decay ([list, None], optional): weight decay for each dynamics and reward model layer. Default=None.
             grad_clip (float, optional): gradient clipping. Default=None
+            device (optional): training device. Default=cpu
         """
         super().__init__(
             obs_dim, act_dim, act_lim, ensemble_dim, hidden_dim, num_hidden, activation, 
             gamma, beta, polyak, tune_beta, clip_lv, rwd_clip_max, False, buffer_size, batch_size, 
             rollout_batch_size, rollout_steps, topk, rollout_min_epoch, rollout_max_epoch, 
-            termination_fn, real_ratio, eval_ratio, m_steps, a_steps, lr_a, lr_c, lr_m, decay, grad_clip
+            termination_fn, real_ratio, eval_ratio, m_steps, a_steps, lr_a, lr_c, lr_m, decay, grad_clip, device
         )
         self.obs_penalty = obs_penalty
         self.plot_keys = [
@@ -91,8 +93,8 @@ class RAMBO(MBPO):
         ]
     
     def compute_dynamics_adversarial_loss(self, batch):
-        obs_norm = batch["obs"]
-        done = batch["done"]
+        obs_norm = batch["obs"].to(self.device)
+        done = batch["done"].to(self.device)
         
         # sample act and next obs
         obs = denormalize(obs_norm, self.obs_mean, self.obs_variance)
@@ -106,9 +108,9 @@ class RAMBO(MBPO):
         # compute model advantage
         if self.termination_fn is not None:
             done = self.termination_fn(
-                obs.data.numpy(), act.data.numpy(), next_obs.data.numpy()
+                obs.cpu().data.numpy(), act.cpu().data.numpy(), next_obs.cpu().data.numpy()
             )
-            done = torch.from_numpy(done).view(-1, 1).to(torch.float32)
+            done = torch.from_numpy(done).view(-1, 1).to(torch.float32).to(self.device)
         
         # compute advantage
         with torch.no_grad():
@@ -146,9 +148,9 @@ class RAMBO(MBPO):
         self.optimizers["critic"].zero_grad()
         
         stats = {
-            "rwd_loss": reward_loss.data.item(),
-            "obs_loss": dynamics_loss.data.item(),
-            "adv_loss": adversarial_loss.data.item()
+            "rwd_loss": reward_loss.cpu().data.item(),
+            "obs_loss": dynamics_loss.cpu().data.item(),
+            "adv_loss": adversarial_loss.cpu().data.item()
         }
         
         self.reward.eval()
@@ -162,9 +164,9 @@ class RAMBO(MBPO):
         data = self.real_buffer.sample(num_total)
 
         # normalize data
-        data["obs"] = normalize(data["obs"], self.obs_mean, self.obs_variance)
-        data["next_obs"] = normalize(data["next_obs"], self.obs_mean, self.obs_variance)
-        data["rwd"] = normalize(data["rwd"], self.rwd_mean, self.rwd_variance)
+        data["obs"] = normalize(data["obs"], self.obs_mean.cpu(), self.obs_variance.cpu())
+        data["next_obs"] = normalize(data["next_obs"], self.obs_mean.cpu(), self.obs_variance.cpu())
+        data["rwd"] = normalize(data["rwd"], self.rwd_mean.cpu(), self.rwd_variance.cpu())
         
         train_data = {k:v[:-num_eval] for k, v in data.items()}
         eval_data = {k:v[-num_eval:] for k, v in data.items()}
@@ -250,9 +252,11 @@ class RAMBO(MBPO):
 
                         # compute estimated return 
                         with torch.no_grad():
-                            r_norm = self.sample_reward_dist(eval_eps[-1]["obs"], eval_eps[-1]["act"])
+                            r_norm = self.sample_reward_dist(
+                                eval_eps[-1]["obs"].to(self.device), eval_eps[-1]["act"].to(self.device)
+                            )
                             r = denormalize(r_norm, self.rwd_mean, self.rwd_variance)
-                        logger.push({"eval_eps_est_return": sum(r)})
+                        logger.push({"eval_eps_est_return": sum(r.cpu())})
                         logger.push({"eval_eps_return": sum(eval_eps[-1]["rwd"])})
                         logger.push({"eval_eps_len": sum(1 - eval_eps[-1]["done"])})
 

@@ -73,6 +73,9 @@ def main(arglist):
     torch.manual_seed(arglist["seed"])
     print(f"training mbpo with settings: {arglist}")
     
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"device: {device}")
+
     render_mode = "human" if arglist["render"] else None
     env = gym.make(
         arglist["env_name"], 
@@ -117,6 +120,7 @@ def main(arglist):
         lr_m=arglist["lr_m"], 
         decay=arglist["decay"], 
         grad_clip=arglist["grad_clip"], 
+        device=device,
     )
     plot_keys = agent.plot_keys
     

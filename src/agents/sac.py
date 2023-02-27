@@ -56,7 +56,8 @@ class SAC(nn.Module):
         steps=50, 
         lr_a=1e-3, 
         lr_c=1e-3, 
-        grad_clip=None
+        grad_clip=None,
+        device=torch.device("cpu")
         ):
         """
         Args:
@@ -76,11 +77,12 @@ class SAC(nn.Module):
             lr_a (float, optional): actor learning rate. Default=1e-3
             lr_c (float, optional): critic learning rate. Default=1e-3
             grad_clip (float, optional): gradient clipping. Default=None
+            device (optional): training device. Default=cpu
         """
         super().__init__()
         self.obs_dim = obs_dim
         self.act_dim = act_dim
-        self.act_lim = act_lim
+        self.act_lim = act_lim.to(device)
         self.gamma = gamma
         self.beta = beta
         self.polyak = polyak
@@ -93,6 +95,7 @@ class SAC(nn.Module):
         self.lr_a = lr_a
         self.lr_c = lr_c
         self.grad_clip = grad_clip
+        self.device = device
         
         self.log_beta = nn.Parameter(np.log(beta) * torch.ones(1), requires_grad=tune_beta)
         self.actor = MLP(obs_dim, act_dim * 2, hidden_dim, num_hidden, activation)
@@ -151,11 +154,11 @@ class SAC(nn.Module):
         return a
 
     def compute_critic_loss(self, batch, rwd_fn=None):
-        obs = batch["obs"]
-        act = batch["act"]
-        r = batch["rwd"]
-        next_obs = batch["next_obs"]
-        done = batch["done"]
+        obs = batch["obs"].to(self.device)
+        act = batch["act"].to(self.device)
+        r = batch["rwd"].to(self.device)
+        next_obs = batch["next_obs"].to(self.device)
+        done = batch["done"].to(self.device)
         
         with torch.no_grad():
             if rwd_fn is not None:
@@ -177,7 +180,7 @@ class SAC(nn.Module):
         return q_loss
     
     def compute_actor_loss(self, batch):
-        obs = batch["obs"]
+        obs = batch["obs"].to(self.device)
         
         act, logp = self.sample_action(obs)
         
@@ -226,10 +229,10 @@ class SAC(nn.Module):
             self.beta = self.log_beta.exp().data
 
         stats = {
-            "actor_loss": actor_loss.data.item(),
-            "critic_loss": critic_loss.data.item(),
-            "beta_loss": beta_loss.data.item(),
-            "beta": self.beta,
+            "actor_loss": actor_loss.cpu().data.item(),
+            "critic_loss": critic_loss.cpu().data.item(),
+            "beta_loss": beta_loss.cpu().data.item(),
+            "beta": self.beta.cpu().item(),
         }
         
         self.actor.eval()
@@ -243,8 +246,8 @@ class SAC(nn.Module):
         for t in range(max_steps):
             with torch.no_grad():
                 act = self.choose_action(
-                    torch.from_numpy(obs).to(torch.float32)
-                ).numpy()
+                    torch.from_numpy(obs).to(torch.float32).to(self.device)
+                ).cpu().numpy()
             next_obs, rwd, terminated, _, _ = env.step(act)
             
             data["obs"].append(obs)
@@ -291,13 +294,13 @@ class SAC(nn.Module):
         obs, eps_return, eps_len = env.reset()[0], 0, 0
         for t in range(total_steps):
             if (t + 1) < update_after:
-                act = torch.rand(self.act_dim).uniform_(-1, 1) * self.act_lim
+                act = torch.rand(self.act_dim).uniform_(-1, 1) * self.act_lim.cpu()
                 act = act.data.numpy()
             else:
                 with torch.no_grad():
                     act = self.choose_action(
-                        torch.from_numpy(obs).view(1, -1).to(torch.float32)
-                    ).numpy().flatten()
+                        torch.from_numpy(obs).view(1, -1).to(torch.float32).to(self.device)
+                    ).cpu().numpy().flatten()
             next_obs, reward, terminated, truncated, info = env.step(act)
             
             eps_return += reward
