@@ -5,13 +5,14 @@ import pickle
 import numpy as np
 import pandas as pd
 import torch
-from torch.utils.data import Dataset, DataLoader
 
-from src.algo.offline_irl import OfflineIRL
+from src.agents.mopo import MBPO
+from src.agents.rl_utils import Logger
 from src.algo.logging_utils import SaveCallback
 
 def parse_args():
     bool_ = lambda x: x if isinstance(x, bool) else x == "True"
+    list_ = lambda x: [float(i.replace(" ", "")) for i in x.split(",")]
     
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=0)
@@ -21,17 +22,18 @@ def parse_args():
     parser.add_argument("--cp_path", type=str, default="none", help="checkpoint path, default=none")
     # algo args
     parser.add_argument("--ensemble_dim", type=int, default=5, help="ensemble size, default=5")
-    parser.add_argument("--hidden_dim", type=int, default=128, help="neural network hidden dims, default=128")
+    parser.add_argument("--hidden_dim", type=int, default=200, help="neural network hidden dims, default=128")
     parser.add_argument("--num_hidden", type=int, default=2, help="number of hidden layers, default=2")
     parser.add_argument("--activation", type=str, default="relu", help="neural network activation, default=relu")
     parser.add_argument("--clip_lv", type=bool_, default=False, help="whether to clip observation variance, default=False")
     # data args
     parser.add_argument("--num_samples", type=int, default=100000, help="number of training transitions, default=100000")
-    parser.add_argument("--train_ratio", type=float, default=0.8, help="train test split ratio, default=0.8")
+    parser.add_argument("--eval_ratio", type=float, default=0.2, help="train test split ratio, default=0.2")
     # training args
     parser.add_argument("--batch_size", type=int, default=200, help="training batch size, default=200")
     parser.add_argument("--lr", type=float, default=0.001, help="learning rate, default=0.001")
-    parser.add_argument("--decay", type=float, default=1e-5, help="weight decay, default=1e-5")
+    parser.add_argument("--decay", type=list_, default=[0.000025, 0.00005, 0.000075, 0.0001], 
+        help="weight decay for each layer, default=[0.000025, 0.00005, 0.000075, 0.0001]")
     parser.add_argument("--grad_clip", type=float, default=100., help="gradient clipping, default=100.")
     # rollout args
     parser.add_argument("--epochs", type=int, default=100, help="number of reward training epochs, default=10")
@@ -42,19 +44,6 @@ def parse_args():
 
     arglist = vars(parser.parse_args())
     return arglist
-
-class CustomDataset(Dataset):
-    def __init__(self, obs, act, next_obs):
-        super().__init__()
-        self.obs = torch.from_numpy(obs).to(torch.float32)
-        self.act = torch.from_numpy(act).to(torch.float32)
-        self.next_obs = torch.from_numpy(next_obs).to(torch.float32)
-
-    def __len__(self):
-        return len(self.obs)
-
-    def __getitem__(self, idx):
-        return {"obs": self.obs[idx], "act": self.act[idx], "next_obs": self.next_obs[idx]}
 
 def main(arglist):
     np.random.seed(arglist["seed"])
@@ -69,56 +58,41 @@ def main(arglist):
     # unpack dataset
     obs = dataset["observations"]
     act = dataset["actions"]
+    rwd = dataset["rewards"].reshape(-1, 1)
     next_obs = dataset["next_observations"]
-    
+    terminated = dataset["terminals"].reshape(-1, 1)
+
     # subsample data
     num_samples = arglist["num_samples"]
-    train_ratio = arglist["train_ratio"]
-    num_train = int(num_samples * train_ratio)
-
     idx = np.arange(len(obs))
     np.random.shuffle(idx)
+    idx = idx[:num_samples]
 
-    idx_train = idx[:num_train]
-    idx_test = idx[num_train:num_samples]
-
-    obs_train = obs[idx_train]
-    act_train = act[idx_train]
-    next_obs_train = next_obs[idx_train]
-
-    obs_test = obs[idx_test]
-    act_test = act[idx_test]
-    next_obs_test = next_obs[idx_test]
-
-    # normalize data
-    obs_mean = obs_train.mean(0)
-    obs_std = obs_train.std(0)    
-
-    obs_train_norm = (obs_train - obs_mean) / obs_std
-    next_obs_train_norm = (next_obs_train - obs_mean) / obs_std
-
-    obs_test_norm = (obs_test - obs_mean) / obs_std
-    next_obs_test_norm = (next_obs_test - obs_mean) / obs_std
+    obs = obs[idx]
+    act = act[idx]
+    rwd = rwd[idx]
+    next_obs = next_obs[idx]
+    terminated = terminated[idx]
     
-    print("train data size:", obs_train.shape, act_train.shape, next_obs_train.shape)
-    print("test data size:", obs_test.shape, act_test.shape, next_obs_test.shape)
-    
-    train_set = CustomDataset(obs_train_norm, act_train, next_obs_train_norm)
-    test_set = CustomDataset(obs_test_norm, act_test, next_obs_test_norm)
-    
-    train_loader = DataLoader(train_set, arglist["batch_size"], shuffle=True)
-    test_loader = DataLoader(test_set, arglist["batch_size"], shuffle=False)
-
     # init model
     obs_dim = obs.shape[-1]
     act_dim = act.shape[-1]
     act_lim = torch.ones(act_dim)
-    agent = OfflineIRL(
-        obs_dim, act_dim, act_lim, 
-        arglist["ensemble_dim"], arglist["hidden_dim"], arglist["num_hidden"], arglist["activation"],
-        clip_lv=arglist["clip_lv"], lr_a=arglist["lr"], decay=arglist["decay"], grad_clip=arglist["grad_clip"]
+    agent = MBPO(
+        obs_dim, 
+        act_dim, 
+        act_lim, 
+        arglist["ensemble_dim"], 
+        arglist["hidden_dim"], 
+        arglist["num_hidden"], 
+        arglist["activation"],
+        clip_lv=arglist["clip_lv"], 
+        eval_ratio=arglist["eval_ratio"],
+        lr_m=arglist["lr"], 
+        decay=arglist["decay"], 
+        grad_clip=arglist["grad_clip"]
     )
-    plot_keys = ["obs_loss_avg", "obs_mae_avg"]
+    plot_keys = ["obs_loss", "obs_mae", "rwd_loss", "rwd_mae"]
     
     # load checkpoint
     cp_history = None
@@ -138,6 +112,10 @@ def main(arglist):
         cp_history = pd.read_csv(os.path.join(cp_path, "history.csv"))
         print(f"loaded checkpoint from {cp_path}\n")
     
+    agent.real_buffer.push_batch(
+        obs, act, rwd, next_obs, terminated
+    )
+    agent.update_stats() # update stats to normalize data in agent
     print(agent)
     
     # init save callback
@@ -146,16 +124,33 @@ def main(arglist):
         callback = SaveCallback(arglist, plot_keys, cp_history=cp_history)
     
     # training loop
-    logger = agent.train_model_offline(train_loader, test_loader, arglist["epochs"], callback=callback)
+    logger = Logger()
+    best_eval = 1e6
+    epoch_since_last_update = 0
+    for e in range(arglist["epochs"]):
+        agent.train_model_epoch(1, logger)
+        logger.push({"epoch": e + 1})
+        logger.log()
+        print()
+
+        if callback is not None:
+            callback(agent, logger)
+        
+        # termination condition based on eval performance
+        current_eval = logger.history[-1]["rwd_mae"] + logger.history[-1]["obs_mae"]
+        improvement = (best_eval - current_eval) / best_eval
+        if improvement > 0.01:
+            epoch_since_last_update = 0
+        else:
+            epoch_since_last_update += 1
+        best_eval = min(best_eval, current_eval)
+        
+        if epoch_since_last_update > 5:
+            break
 
     if arglist["save"]:
         callback.save_checkpoint(agent)
         callback.save_history(pd.DataFrame(logger.history))
-
-        # save normalization stats
-        with open(os.path.join(callback.save_path, "norm_stats.npy"), "wb") as f:
-            np.save(f, obs_mean)
-            np.save(f, obs_std)
 
 
 if __name__ == "__main__":
