@@ -45,7 +45,8 @@ class MBPO(SAC):
         lr_c=0.001, 
         lr_m=0.001, 
         decay=None, 
-        grad_clip=None
+        grad_clip=None,
+        device=torch.device("cpu")
         ):
         """
         Args:
@@ -80,11 +81,12 @@ class MBPO(SAC):
             lr_m (float, optional): model learning rate. Default=1e-3
             decay ([list, None], optional): weight decay for each dynamics and reward model layer. Default=None.
             grad_clip (float, optional): gradient clipping. Default=None
+            device (optional): training device. Default=cpu
         """
         super().__init__(
             obs_dim, act_dim, act_lim, hidden_dim, num_hidden, activation, 
             gamma, beta, polyak, tune_beta, buffer_size, batch_size, a_steps, 
-            lr_a, lr_c, grad_clip
+            lr_a, lr_c, grad_clip, device
         )
         self.ensemble_dim = ensemble_dim
         self.clip_lv = clip_lv
@@ -138,10 +140,10 @@ class MBPO(SAC):
         self.rwd_variance = nn.Parameter(torch.ones(1), requires_grad=False)
     
     def update_stats(self):
-        self.obs_mean.data = torch.from_numpy(self.real_buffer.obs_mean).to(torch.float32)
-        self.obs_variance.data = torch.from_numpy(self.real_buffer.obs_variance).to(torch.float32)
-        self.rwd_mean.data = torch.from_numpy(self.real_buffer.rwd_mean).to(torch.float32)
-        self.rwd_variance.data = torch.from_numpy(self.real_buffer.rwd_variance).to(torch.float32)
+        self.obs_mean.data = torch.from_numpy(self.real_buffer.obs_mean).to(torch.float32).to(self.device)
+        self.obs_variance.data = torch.from_numpy(self.real_buffer.obs_variance).to(torch.float32).to(self.device)
+        self.rwd_mean.data = torch.from_numpy(self.real_buffer.rwd_mean).to(torch.float32).to(self.device)
+        self.rwd_variance.data = torch.from_numpy(self.real_buffer.rwd_variance).to(torch.float32).to(self.device)
     
     def compute_reward_dist(self, obs, act):
         obs_act = torch.cat([obs, act], dim=-1)
@@ -164,7 +166,9 @@ class MBPO(SAC):
         rwd = rwd_dist.rsample()
         
         # randomly select from top models
-        ensemble_idx = torch_dist.Categorical(torch.ones_like(self.topk_dist)).sample(obs.shape[:-1]).unsqueeze(-1).unsqueeze(-1)
+        ensemble_idx = torch_dist.Categorical(
+            torch.ones_like(self.topk_dist)
+        ).sample(obs.shape[:-1]).unsqueeze(-1).unsqueeze(-1).to(self.device)
         rwd = torch.gather(rwd, -2, ensemble_idx).squeeze(-2)
         return rwd
 
@@ -189,14 +193,14 @@ class MBPO(SAC):
         
         # randomly select from top models
         ensemble_idx = torch_dist.Categorical(self.topk_dist).sample(obs.shape[:-1]).unsqueeze(-1)
-        ensemble_idx_ = ensemble_idx.unsqueeze(-1).repeat_interleave(obs.shape[-1], dim=-1) # duplicate alone feature dim
+        ensemble_idx_ = ensemble_idx.unsqueeze(-1).repeat_interleave(obs.shape[-1], dim=-1).to(self.device) # duplicate alone feature dim
         next_obs = torch.gather(next_obs, -2, ensemble_idx_).squeeze(-2)
         return next_obs
 
     def compute_reward_loss(self, batch):
-        obs = batch["obs"]
-        act = batch["act"]
-        r = batch["rwd"]
+        obs = batch["obs"].to(self.device)
+        act = batch["act"].to(self.device)
+        r = batch["rwd"].to(self.device)
         
         logp = self.compute_reward_log_prob(obs, act, r).sum(-1)
         decay_loss = self.compute_decay_loss(self.reward)
@@ -204,9 +208,9 @@ class MBPO(SAC):
         return loss
 
     def compute_dynamics_loss(self, batch):
-        obs = batch["obs"]
-        act = batch["act"]
-        next_obs = batch["next_obs"]
+        obs = batch["obs"].to(self.device)
+        act = batch["act"].to(self.device)
+        next_obs = batch["next_obs"].to(self.device)
 
         logp = self.compute_transition_log_prob(obs, act, next_obs).sum(-1)
         decay_loss = self.compute_decay_loss(self.dynamics)
@@ -224,9 +228,9 @@ class MBPO(SAC):
     def eval_reward(self, batch):
         self.reward.eval()
 
-        obs = batch["obs"]
-        act = batch["act"]
-        rwd = batch["rwd"]
+        obs = batch["obs"].to(self.device)
+        act = batch["act"].to(self.device)
+        rwd = batch["rwd"].to(self.device)
         
         with torch.no_grad():
             rwd_pred = self.compute_reward_dist(obs, act).mean
@@ -234,24 +238,24 @@ class MBPO(SAC):
         rwd_mae = torch.abs(rwd_pred - rwd.unsqueeze(-2)).mean()
         
         stats = {
-            "rwd_mae": rwd_mae.data.item()
+            "rwd_mae": rwd_mae.cpu().data.item()
         }
         return stats
 
     def eval_model(self, batch):
         self.dynamics.eval()
 
-        obs = batch["obs"]
-        act = batch["act"]
-        next_obs = batch["next_obs"]
+        obs = batch["obs"].to(self.device)
+        act = batch["act"].to(self.device)
+        next_obs = batch["next_obs"].to(self.device)
 
         with torch.no_grad():
             next_obs_pred = self.compute_transition_dist(obs, act).mean
         
         obs_mae = torch.abs(next_obs_pred - next_obs.unsqueeze(-2)).mean((0, 2))
         
-        stats = {f"obs_mae_{i}": obs_mae[i].data.item() for i in range(self.ensemble_dim)}
-        stats["obs_mae"] = obs_mae.mean().data.item()
+        stats = {f"obs_mae_{i}": obs_mae[i].cpu().data.item() for i in range(self.ensemble_dim)}
+        stats["obs_mae"] = obs_mae.mean().cpu().data.item()
         return stats
     
     def take_reward_gradient_step(self, batch):
@@ -263,7 +267,7 @@ class MBPO(SAC):
         self.optimizers["reward"].zero_grad()
         
         stats = {
-            "rwd_loss": reward_loss.data.item(),
+            "rwd_loss": reward_loss.cpu().data.item(),
         }
         self.reward.eval()
         return stats
@@ -277,7 +281,7 @@ class MBPO(SAC):
         self.optimizers["dynamics"].zero_grad()
         
         stats = {
-            "obs_loss": dynamics_loss.data.item(),
+            "obs_loss": dynamics_loss.cpu().data.item(),
         }
 
         self.dynamics.eval()
@@ -289,9 +293,9 @@ class MBPO(SAC):
         data = self.real_buffer.sample(self.real_buffer.size)
 
         # normalize data
-        data["obs"] = normalize(data["obs"], self.obs_mean, self.obs_variance)
-        data["next_obs"] = normalize(data["next_obs"], self.obs_mean, self.obs_variance)
-        data["rwd"] = normalize(data["rwd"], self.rwd_mean, self.rwd_variance)
+        data["obs"] = normalize(data["obs"], self.obs_mean.cpu(), self.obs_variance.cpu())
+        data["next_obs"] = normalize(data["next_obs"], self.obs_mean.cpu(), self.obs_variance.cpu())
+        data["rwd"] = normalize(data["rwd"], self.rwd_mean.cpu(), self.rwd_variance.cpu())
 
         train_data = {k:v[:-num_eval] for k, v in data.items()}
         eval_data = {k:v[-num_eval:] for k, v in data.items()}
@@ -392,7 +396,9 @@ class MBPO(SAC):
                 next_obs = denormalize(next_obs_norm, self.obs_mean, self.obs_variance)
 
             if self.termination_fn is not None:
-                done = self.termination_fn(obs.numpy(), act.numpy(), next_obs.numpy())
+                done = self.termination_fn(
+                    obs.cpu().numpy(), act.cpu().numpy(), next_obs.cpu().numpy()
+                )
                 done = torch.from_numpy(done).view(-1, 1).to(torch.float32)
             
             data["obs"].append(obs)
@@ -434,14 +440,16 @@ class MBPO(SAC):
                 in zip(real_batch.items(), fake_batch.items())
             }
         
-        rollout_data = self.rollout_dynamics(batch["obs"], batch["done"], rollout_steps)
+        rollout_data = self.rollout_dynamics(
+            batch["obs"].to(self.device), batch["done"].to(self.device), rollout_steps
+        )
         rollout_data = {k: v.flatten(0, 1) for k, v in rollout_data.items()}
         self.replay_buffer.push_batch(
-            rollout_data["obs"].numpy(),
-            rollout_data["act"].numpy(),
-            rollout_data["rwd"].numpy(),
-            rollout_data["next_obs"].numpy(),
-            rollout_data["done"].numpy()
+            rollout_data["obs"].cpu().numpy(),
+            rollout_data["act"].cpu().numpy(),
+            rollout_data["rwd"].cpu().numpy(),
+            rollout_data["next_obs"].cpu().numpy(),
+            rollout_data["done"].cpu().numpy()
         )
     
     def compute_rollout_steps(self, epoch):
@@ -478,13 +486,13 @@ class MBPO(SAC):
         obs, eps_return, eps_len = env.reset()[0], 0, 0
         for t in range(total_steps):
             if (t + 1) < update_after:
-                act = torch.rand(self.act_dim).uniform_(-1, 1) * self.act_lim
+                act = torch.rand(self.act_dim).uniform_(-1, 1) * self.act_lim.cpu()
                 act = act.data.numpy()
             else:
                 with torch.no_grad():
                     act = self.choose_action(
-                        torch.from_numpy(obs).view(1, -1).to(torch.float32)
-                    ).numpy().flatten()
+                        torch.from_numpy(obs).view(1, -1).to(torch.float32).to(self.device)
+                    ).cpu().numpy().flatten()
             next_obs, reward, terminated, truncated, info = env.step(act)
             
             eps_return += reward

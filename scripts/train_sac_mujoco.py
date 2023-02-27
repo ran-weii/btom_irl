@@ -54,6 +54,9 @@ def main(arglist):
     torch.manual_seed(arglist["seed"])
     print(f"training sac with settings: {arglist}")
     
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"device: {device}")
+    
     render_mode = "human" if arglist["render"] else None
     env = gym.make(
         arglist["env_name"],  
@@ -82,6 +85,7 @@ def main(arglist):
         lr_a=arglist["lr_a"], 
         lr_c=arglist["lr_c"], 
         grad_clip=arglist["grad_clip"], 
+        device=device,
     )
     plot_keys = agent.plot_keys
     
@@ -103,6 +107,7 @@ def main(arglist):
         cp_history = pd.read_csv(os.path.join(cp_path, "history.csv"))
         print(f"loaded checkpoint from {cp_path}\n")
     
+    agent.to(device)
     print(agent)
     
     # init save callback

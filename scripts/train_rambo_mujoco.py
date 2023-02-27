@@ -82,6 +82,9 @@ def main(arglist):
     torch.manual_seed(arglist["seed"])
     print(f"training rambo with settings: {arglist}")
     
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"device: {device}")
+
     # load data
     filename = os.path.join(arglist["data_path"], arglist["filename"])
     with open(filename, "rb") as f:
@@ -164,6 +167,7 @@ def main(arglist):
         lr_m=arglist["lr_m"], 
         decay=arglist["decay"], 
         grad_clip=arglist["grad_clip"], 
+        device=device,
     )
     plot_keys = agent.plot_keys
 
@@ -195,6 +199,7 @@ def main(arglist):
         cp_history = pd.read_csv(os.path.join(cp_path, "history.csv"))
         print(f"loaded checkpoint from {cp_path}\n")
     
+    agent.to(device)
     print(agent)
     print(f"real buffer size: {agent.real_buffer.size}")
     
