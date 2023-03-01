@@ -124,11 +124,14 @@ class SAC(nn.Module):
         
         self.plot_keys = ["eval_eps_return_avg", "eval_eps_len_avg", "critic_loss_avg", "actor_loss_avg", "beta_avg"]
     
-    def sample_action(self, obs):
+    def sample_action(self, obs, sample_mean=False):
         mu, lv = torch.chunk(self.actor.forward(obs), 2, dim=-1)
         std = torch.exp(lv.clip(np.log(1e-3), np.log(100)))
         base_dist = torch_dist.Normal(mu, std)
-        act = base_dist.rsample()
+        if sample_mean:
+            act = base_dist.mean
+        else:
+            act = base_dist.rsample()
         logp = base_dist.log_prob(act).sum(-1, keepdim=True)
 
         ldj = (2. * (np.log(2.) - act - F.softplus(-2. * act)))
@@ -148,9 +151,9 @@ class SAC(nn.Module):
         base_dist = torch_dist.Normal(mu, std)
         return base_dist.log_prob(act_inv).sum(-1, keepdim=True)
 
-    def choose_action(self, obs):
+    def choose_action(self, obs, sample_mean=False):
         with torch.no_grad():
-            a, _ = self.sample_action(obs)
+            a, _ = self.sample_action(obs, sample_mean)
         return a
 
     def compute_critic_loss(self, batch, rwd_fn=None):
@@ -239,14 +242,15 @@ class SAC(nn.Module):
         self.critic.eval()
         return stats
     
-    def rollout(self, env, max_steps):
+    def rollout(self, env, max_steps, sample_mean=False):
         obs = env.reset()[0]
 
         data = {"obs": [], "act": [], "next_obs": [], "rwd": [], "done": []}
         for t in range(max_steps):
             with torch.no_grad():
                 act = self.choose_action(
-                    torch.from_numpy(obs).to(torch.float32).to(self.device)
+                    torch.from_numpy(obs).to(torch.float32).to(self.device),
+                    sample_mean=sample_mean
                 ).cpu().numpy()
             next_obs, rwd, terminated, _, _ = env.step(act)
             
@@ -283,7 +287,7 @@ class SAC(nn.Module):
 
     def train_policy(
         self, env, eval_env, max_steps, epochs, steps_per_epoch, update_after, update_every, 
-        rwd_fn=None, num_eval_eps=0, callback=None, verbose=True
+        rwd_fn=None, num_eval_eps=0, eval_deterministic=True, callback=None, verbose=50
         ):
         logger = Logger()
 
@@ -323,7 +327,7 @@ class SAC(nn.Module):
             # train model
             if (t + 1) > update_after and (t - update_after + 1) % update_every == 0:
                 policy_stats_epoch = self.train_policy_epoch(rwd_fn=rwd_fn, logger=logger)
-                if verbose:
+                if (t + 1) % verbose == 0:
                     round_loss_dict = {k: round(v, 3) for k, v in policy_stats_epoch.items()}
                     print(f"e: {epoch + 1}, t: {t + 1}, {round_loss_dict}")
 
@@ -335,7 +339,7 @@ class SAC(nn.Module):
                 if num_eval_eps > 0:
                     eval_eps = []
                     for i in range(num_eval_eps):
-                        eval_eps.append(self.rollout(eval_env, max_steps))
+                        eval_eps.append(self.rollout(eval_env, max_steps, sample_mean=eval_deterministic))
                         logger.push({"eval_eps_return": sum(eval_eps[-1]["rwd"])})
                         logger.push({"eval_eps_len": sum(1 - eval_eps[-1]["done"])})
 

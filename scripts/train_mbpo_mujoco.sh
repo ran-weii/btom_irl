@@ -37,6 +37,7 @@ python train_mbpo_mujoco.py \
 --update_policy_every 10 \
 --cp_every 10 \
 --num_eval_eps 5 \
+--eval_deterministic True \
 --verbose 20 \
 --render False \
 --save False \

@@ -41,7 +41,7 @@ class RAMBO(MBPO):
         lr_a=1e-4, 
         lr_c=3e-4, 
         lr_m=3e-4, 
-        decay=0, 
+        decay=None, 
         grad_clip=None,
         device=torch.device("cpu")
         ):
@@ -200,7 +200,7 @@ class RAMBO(MBPO):
 
     def train_policy(
         self, eval_env, max_steps, epochs, steps_per_epoch, sample_model_every, 
-        rwd_fn=None, num_eval_eps=0, callback=None, verbose=True
+        rwd_fn=None, num_eval_eps=0, eval_deterministic=True, callback=None, verbose=True
         ):
         logger = Logger()
 
@@ -248,7 +248,7 @@ class RAMBO(MBPO):
                 if num_eval_eps > 0:
                     eval_eps = []
                     for i in range(num_eval_eps):
-                        eval_eps.append(self.rollout(eval_env, max_steps))
+                        eval_eps.append(self.rollout(eval_env, max_steps, sample_mean=eval_deterministic))
 
                         # compute estimated return 
                         with torch.no_grad():
