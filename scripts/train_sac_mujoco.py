@@ -41,7 +41,8 @@ def parse_args():
     parser.add_argument("--update_every", type=int, default=50)
     parser.add_argument("--cp_every", type=int, default=10, help="checkpoint interval, default=10")
     parser.add_argument("--num_eval_eps", type=int, default=5, help="number of evaluation episodes, default=5")
-    parser.add_argument("--verbose", type=bool_, default=True)
+    parser.add_argument("--eval_deterministic", type=bool_, default=True, help="whether to evaluate deterministically, default=True")
+    parser.add_argument("--verbose", type=int, default=50, help="verbose interval, default=50")
     parser.add_argument("--render", type=bool_, default=False)
     parser.add_argument("--save", type=bool_, default=True)
     arglist = parser.parse_args()
@@ -87,6 +88,7 @@ def main(arglist):
         grad_clip=arglist["grad_clip"], 
         device=device,
     )
+    agent.to(device)
     plot_keys = agent.plot_keys
     
     # load checkpoint
@@ -98,7 +100,7 @@ def main(arglist):
         cp_model_path = glob.glob(os.path.join(cp_path, "models/*.pt"))
         cp_model_path.sort(key=lambda x: int(os.path.basename(x).replace(".pt", "").split("_")[-1]))
         
-        state_dict = torch.load(cp_model_path[-1], map_location="cpu")
+        state_dict = torch.load(cp_model_path[-1], map_location=device)
         agent.load_state_dict(state_dict["model_state_dict"], strict=False)
         for optimizer_name, optimizer_state_dict in state_dict["optimizer_state_dict"].items():
             agent.optimizers[optimizer_name].load_state_dict(optimizer_state_dict)
@@ -107,7 +109,6 @@ def main(arglist):
         cp_history = pd.read_csv(os.path.join(cp_path, "history.csv"))
         print(f"loaded checkpoint from {cp_path}\n")
     
-    agent.to(device)
     print(agent)
     
     # init save callback
@@ -125,7 +126,7 @@ def main(arglist):
     logger = agent.train_policy(
         env, eval_env, arglist["max_steps"], arglist["epochs"], arglist["steps_per_epoch"],
         arglist["update_after"], arglist["update_every"], rwd_fn=None, num_eval_eps=arglist["num_eval_eps"],
-        callback=callback, verbose=arglist["verbose"]
+        eval_deterministic=arglist["eval_deterministic"], callback=callback, verbose=arglist["verbose"]
     )
 
     if arglist["save"]:

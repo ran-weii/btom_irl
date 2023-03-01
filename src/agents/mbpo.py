@@ -474,8 +474,8 @@ class MBPO(SAC):
 
     def train_policy(
         self, env, eval_env, max_steps, epochs, steps_per_epoch, update_after, 
-        update_model_every, update_policy_every,
-        rwd_fn=None, num_eval_eps=0, callback=None, verbose=True
+        update_model_every, update_policy_every, rwd_fn=None, 
+        num_eval_eps=0, eval_deterministic=True, callback=None, verbose=True
         ):
         logger = Logger()
 
@@ -545,7 +545,7 @@ class MBPO(SAC):
                 if num_eval_eps > 0:
                     eval_eps = []
                     for i in range(num_eval_eps):
-                        eval_eps.append(self.rollout(eval_env, max_steps))
+                        eval_eps.append(self.rollout(eval_env, max_steps, sample_mean=eval_deterministic))
                         logger.push({"eval_eps_return": sum(eval_eps[-1]["rwd"])})
                         logger.push({"eval_eps_len": sum(1 - eval_eps[-1]["done"])})
 

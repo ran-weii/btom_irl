@@ -42,6 +42,7 @@ python train_rambo_mujoco.py \
 --update_policy_every 1 \
 --cp_every 10 \
 --num_eval_eps 5 \
+--eval_deterministic True \
 --verbose 50 \
 --render False \
 --save False \
