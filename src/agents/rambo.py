@@ -41,7 +41,7 @@ class RAMBO(MBPO):
         lr_a=1e-4, 
         lr_c=3e-4, 
         lr_m=3e-4, 
-        decay=0, 
+        decay=None, 
         grad_clip=None,
         device=torch.device("cpu")
         ):
