@@ -16,7 +16,7 @@ python train_rambo_mujoco.py \
 --tune_beta True \
 --clip_lv True \
 --rwd_clip_max 5. \
---obs_penalty 3e-4 \
+--adv_penalty 3e-4 \
 --norm_advantage True \
 --buffer_size 1000000 \
 --batch_size 200 \

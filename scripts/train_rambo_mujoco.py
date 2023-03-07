@@ -40,7 +40,7 @@ def parse_args():
     parser.add_argument("--tune_beta", type=bool_, default=True, help="whether to tune beta, default=True")
     parser.add_argument("--clip_lv", type=bool_, default=False, help="whether to clip observation variance, default=False")
     parser.add_argument("--rwd_clip_max", type=float, default=10., help="clip reward max value, default=10.")
-    parser.add_argument("--obs_penalty", type=float, default=10., help="transition likelihood penalty, default=10.")
+    parser.add_argument("--adv_penalty", type=float, default=3e-4, help="model advantage penalty, default=3e-4")
     parser.add_argument("--norm_advantage", type=bool_, default=True, help="whether to normalize advantage, default=True")
     # training args
     parser.add_argument("--buffer_size", type=int, default=1e6, help="replay buffer size, default=1e6")
@@ -156,7 +156,7 @@ def main(arglist):
         tune_beta=arglist["tune_beta"],
         clip_lv=arglist["clip_lv"], 
         rwd_clip_max=arglist["rwd_clip_max"], 
-        obs_penalty=arglist["obs_penalty"], 
+        adv_penalty=arglist["adv_penalty"], 
         norm_advantage=arglist["norm_advantage"],
         buffer_size=arglist["buffer_size"], 
         batch_size=arglist["batch_size"], 

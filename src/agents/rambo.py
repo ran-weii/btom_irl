@@ -25,7 +25,7 @@ class RAMBO(MBPO):
         tune_beta=True,
         clip_lv=False, 
         rwd_clip_max=10., 
-        obs_penalty=10., 
+        adv_penalty=10., 
         norm_advantage=False,
         buffer_size=1e6, 
         batch_size=200, 
@@ -62,7 +62,7 @@ class RAMBO(MBPO):
             tune_beta (bool, optional): whether to automatically tune temperature. Default=True
             clip_lv (bool, optional): whether to soft clip observation log variance. Default=False
             rwd_clip_max (float, optional): clip reward max value. Default=10.
-            obs_penalty (float, optional): observation likelihood penalty. Default=10.
+            adv_penalty (float, optional): model advantage penalty. Default=3e-4.
             norm_advantage (bool, optional): whether to normalize advantage. Default=False
             buffer_size (int, optional): replay buffer size. Default=1e6
             batch_size (int, optional): actor and critic batch size. Default=100
@@ -90,7 +90,7 @@ class RAMBO(MBPO):
             rollout_batch_size, rollout_min_steps, rollout_max_steps, rollout_min_epoch, rollout_max_epoch, topk,
             termination_fn, real_ratio, eval_ratio, m_steps, a_steps, lr_a, lr_c, lr_m, decay, grad_clip, device
         )
-        self.obs_penalty = obs_penalty
+        self.adv_penalty = adv_penalty
         self.norm_advantage = norm_advantage
         self.plot_keys = [
             "eval_eps_return_avg", "eval_eps_len_avg", "critic_loss_avg", 
@@ -144,7 +144,7 @@ class RAMBO(MBPO):
         adversarial_loss = self.compute_dynamics_adversarial_loss(real_batch)
         reward_loss = self.compute_reward_loss(real_batch)
         dynamics_loss = self.compute_dynamics_loss(real_batch)
-        total_loss = reward_loss + dynamics_loss + self.obs_penalty * adversarial_loss
+        total_loss = reward_loss + dynamics_loss + self.adv_penalty * adversarial_loss
         total_loss.backward()
 
         self.optimizers["dynamics"].step()
