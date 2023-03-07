@@ -40,15 +40,17 @@ def parse_args():
     parser.add_argument("--tune_beta", type=bool_, default=True, help="whether to tune beta, default=True")
     parser.add_argument("--clip_lv", type=bool_, default=False, help="whether to clip observation variance, default=False")
     parser.add_argument("--rwd_clip_max", type=float, default=10., help="clip reward max value, default=10.")
-    parser.add_argument("--obs_penalty", type=float, default=10., help="transition likelihood penalty, default=10.")
+    parser.add_argument("--adv_penalty", type=float, default=3e-4, help="model advantage penalty, default=3e-4")
+    parser.add_argument("--norm_advantage", type=bool_, default=True, help="whether to normalize advantage, default=True")
     # training args
     parser.add_argument("--buffer_size", type=int, default=1e6, help="replay buffer size, default=1e6")
     parser.add_argument("--batch_size", type=int, default=200, help="training batch size, default=200")
     parser.add_argument("--rollout_batch_size", type=int, default=10000, help="model rollout batch size, default=10000")
-    parser.add_argument("--rollout_steps", type=int, default=100, help="dynamics rollout steps, default=100")
-    parser.add_argument("--topk", type=int, default=5, help="top k models to perform rollout, default=5")
+    parser.add_argument("--rollout_min_steps", type=int, default=1, help="min dynamics rollout steps, default=1")
+    parser.add_argument("--rollout_max_steps", type=int, default=10, help="max dynamics rollout steps, default=10")
     parser.add_argument("--rollout_min_epoch", type=int, default=20, help="epoch to start increasing rollout steps, default=20")
     parser.add_argument("--rollout_max_epoch", type=int, default=100, help="epoch to stop increasing rollout steps, default=100")
+    parser.add_argument("--topk", type=int, default=5, help="top k models to perform rollout, default=5")
     parser.add_argument("--real_ratio", type=float, default=0.05, help="ratio of real samples for policy training, default=0.05")
     parser.add_argument("--eval_ratio", type=float, default=0.2, help="ratio of real samples for model evaluation, default=0.2")
     parser.add_argument("--m_steps", type=int, default=100, help="model training steps per update, default=100")
@@ -134,7 +136,11 @@ def main(arglist):
     obs_dim = obs.shape[-1]
     act_dim = act.shape[-1]
     act_lim = torch.ones(act_dim)
-    termination_fn = get_termination_fn(arglist["env_name"], obs_mean, obs_std)
+    termination_fn = get_termination_fn(
+        arglist["env_name"], 
+        obs_mean=obs_mean, 
+        obs_variance=obs_std**2
+    )
 
     agent = RAMBO(
         obs_dim, 
@@ -150,14 +156,16 @@ def main(arglist):
         tune_beta=arglist["tune_beta"],
         clip_lv=arglist["clip_lv"], 
         rwd_clip_max=arglist["rwd_clip_max"], 
-        obs_penalty=arglist["obs_penalty"], 
-        rollout_steps=arglist["rollout_steps"], 
+        adv_penalty=arglist["adv_penalty"], 
+        norm_advantage=arglist["norm_advantage"],
         buffer_size=arglist["buffer_size"], 
         batch_size=arglist["batch_size"], 
         rollout_batch_size=arglist["rollout_batch_size"], 
-        topk=arglist["topk"], 
+        rollout_min_steps=arglist["rollout_min_steps"], 
+        rollout_max_steps=arglist["rollout_max_steps"], 
         rollout_min_epoch=arglist["rollout_min_epoch"], 
         rollout_max_epoch=arglist["rollout_max_epoch"], 
+        topk=arglist["topk"], 
         termination_fn=termination_fn, 
         real_ratio=arglist["real_ratio"], 
         eval_ratio=arglist["eval_ratio"],

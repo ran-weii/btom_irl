@@ -32,10 +32,11 @@ class MBPO(SAC):
         buffer_size=1e6, 
         batch_size=200, 
         rollout_batch_size=10000, 
-        rollout_steps=10, 
-        topk=5, 
+        rollout_min_steps=1, 
+        rollout_max_steps=10, 
         rollout_min_epoch=20, 
-        rollout_max_epoch=100, 
+        rollout_max_epoch=100,
+        topk=5,  
         termination_fn=None, 
         real_ratio=0.05, 
         eval_ratio=0.2, 
@@ -67,10 +68,11 @@ class MBPO(SAC):
             buffer_size (int, optional): replay buffer size. Default=1e6
             batch_size (int, optional): actor and critic batch size. Default=100
             rollout_batch_size (int, optional): model_rollout batch size. Default=10000
-            rollout_steps (int, optional): number of model rollout steps. Default=10
+            rollout_min_steps (int, optional): initial model rollout steps. Default=1
+            rollout_max_steps (int, optional): maximum model rollout steps. Default=10
+            rollout_min_epoch (int, optional): epoch to start increasing rollout length. Default=20
+            rollout_max_epoch (int, optional): epoch to stop increasing rollout length. Default=100
             topk (int, optional): top k models to perform rollout. Default=5
-            min_rollout_epoch (int, optional): epoch to start increasing rollout length. Default=20
-            max_rollout_epoch (int, optional): epoch to stop increasing rollout length. Default=100
             termination_fn (func, optional): termination function to output rollout done. Default=None
             real_ratio (float, optional): ratio of real samples for policy training. Default=0.05
             eval_ratio (float, optional): ratio of real samples for model evaluation. Default=0.2
@@ -94,11 +96,12 @@ class MBPO(SAC):
         self.norm_obs = norm_obs
         
         self.rollout_batch_size = rollout_batch_size
-        self.rollout_steps = rollout_steps
-        self.topk = topk
-        self.topk_dist = torch.ones(ensemble_dim) / ensemble_dim # model selection distribution
+        self.rollout_min_steps = rollout_min_steps
+        self.rollout_max_steps = rollout_max_steps
         self.rollout_min_epoch = rollout_min_epoch # used to calculate rollout steps
         self.rollout_max_epoch = rollout_max_epoch # used to calculate rollout steps
+        self.topk = topk
+        self.topk_dist = torch.ones(ensemble_dim) / ensemble_dim # model selection distribution
         self.termination_fn = termination_fn
         self.real_ratio = real_ratio
         self.eval_ratio = eval_ratio
@@ -380,7 +383,6 @@ class MBPO(SAC):
         self.reward.eval()
         self.dynamics.eval()
         
-        obs0 = obs.clone()
         obs = obs.clone()
         done = done.clone()
         data = {"obs": [], "act": [], "next_obs": [], "rwd": [], "done": []}
@@ -408,11 +410,6 @@ class MBPO(SAC):
             data["done"].append(done)
             
             obs = next_obs.clone()
-            
-            # # reinit samples
-            # if self.termination_fn is not None:
-            #     idx = torch_dist.Categorical(self.topk_dist).sample((int(done.sum()), ))
-            #     obs[done.flatten() == 1] = obs0[idx]
 
         data["obs"] = torch.stack(data["obs"])
         data["act"] = torch.stack(data["act"])
@@ -454,11 +451,10 @@ class MBPO(SAC):
     
     def compute_rollout_steps(self, epoch):
         """ Linearly increate rollout steps based on epoch """
-        min_rollout_steps = 1
         ratio = (epoch - self.rollout_min_epoch) / (self.rollout_max_epoch - self.rollout_min_epoch)
         rollout_steps = min(
-            self.rollout_steps, max(
-                min_rollout_steps, min_rollout_steps + ratio * (self.rollout_steps - min_rollout_steps)
+            self.rollout_max_steps, max(
+                self.rollout_min_steps, self.rollout_min_steps + ratio * (self.rollout_max_steps - self.rollout_min_steps)
             )
         )
         return int(rollout_steps)
@@ -470,7 +466,6 @@ class MBPO(SAC):
         topk_dist = np.zeros(self.ensemble_dim)
         topk_dist[idx_topk] = 1./self.topk
         self.topk_dist = torch.from_numpy(topk_dist).to(torch.float32)
-        print("top k dist", self.topk_dist.numpy())
 
     def train_policy(
         self, env, eval_env, max_steps, epochs, steps_per_epoch, update_after, 
@@ -518,6 +513,7 @@ class MBPO(SAC):
                     self.update_stats()
                 model_stats_epoch = self.train_model_epoch(self.m_steps, logger=logger)
                 self.compute_topk_dist(model_stats_epoch)
+                print("top k dist", self.topk_dist.numpy())
                 if verbose:
                     round_loss_dict = {k: round(v, 3) for k, v in model_stats_epoch.items()}
                     print(f"e: {epoch + 1}, t model: {t + 1}, {round_loss_dict}")

@@ -28,19 +28,17 @@ class GymEnv(gym.Env):
 
 
 class HopperTermination:
-    def __init__(self, obs_mean=0., obs_std=1.):
+    def __init__(self, obs_mean=0., obs_variance=1.):
         self.obs_mean = obs_mean
-        self.obs_std = obs_std
-
+        self.obs_variance = obs_variance
+    
     def termination_fn(self, obs, act, next_obs):
-        assert len(obs.shape) == len(next_obs.shape) == len(act.shape) == 2
+        next_obs = denormalize(next_obs.copy(), self.obs_mean, self.obs_variance)
         
-        next_obs = denormalize(next_obs.copy(), self.obs_mean, self.obs_std)
-        
-        height = next_obs[:, 0]
-        angle = next_obs[:, 1]
+        height = next_obs[..., 0]
+        angle = next_obs[..., 1]
         not_done = np.isfinite(next_obs).all(axis=-1) \
-                    * np.abs(next_obs[:, 1:] < 100).all(axis=-1) \
+                    * np.abs(next_obs[..., 1:] < 100).all(axis=-1) \
                     * (height > .7) \
                     * (np.abs(angle) < .2)
 
@@ -48,7 +46,7 @@ class HopperTermination:
         return done
 
 
-def get_termination_fn(env_name, obs_mean=0., obs_std=1.):
+def get_termination_fn(env_name, obs_mean=0., obs_variance=1.):
     if "Hopper" in env_name:
-        termination_fn = HopperTermination(obs_mean, obs_std).termination_fn
+        termination_fn = HopperTermination(obs_mean, obs_variance).termination_fn
     return termination_fn

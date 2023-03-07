@@ -25,14 +25,16 @@ class RAMBO(MBPO):
         tune_beta=True,
         clip_lv=False, 
         rwd_clip_max=10., 
-        obs_penalty=10., 
+        adv_penalty=10., 
+        norm_advantage=False,
         buffer_size=1e6, 
         batch_size=200, 
-        rollout_steps=10, 
         rollout_batch_size=10000, 
-        topk=5,
+        rollout_min_steps=1, 
+        rollout_max_steps=10, 
         rollout_min_epoch=20, 
         rollout_max_epoch=100, 
+        topk=5,
         termination_fn=None, 
         real_ratio=0.05, 
         eval_ratio=0.2,
@@ -60,14 +62,16 @@ class RAMBO(MBPO):
             tune_beta (bool, optional): whether to automatically tune temperature. Default=True
             clip_lv (bool, optional): whether to soft clip observation log variance. Default=False
             rwd_clip_max (float, optional): clip reward max value. Default=10.
-            obs_penalty (float, optional): observation likelihood penalty. Default=10.
+            adv_penalty (float, optional): model advantage penalty. Default=3e-4.
+            norm_advantage (bool, optional): whether to normalize advantage. Default=False
             buffer_size (int, optional): replay buffer size. Default=1e6
             batch_size (int, optional): actor and critic batch size. Default=100
             rollout_batch_size (int, optional): model_rollout batch size. Default=10000
-            rollout_steps (int, optional): number of model rollout steps. Default=10
+            rollout_min_steps (int, optional): initial model rollout steps. Default=1
+            rollout_max_steps (int, optional): maximum model rollout steps. Default=10
+            rollout_min_epoch (int, optional): epoch to start increasing rollout length. Default=20
+            rollout_max_epoch (int, optional): epoch to stop increasing rollout length. Default=100
             topk (int, optional): top k models to perform rollout. Default=5
-            min_rollout_epoch (int, optional): epoch to start increasing rollout length. Default=20
-            max_rollout_epoch (int, optional): epoch to stop increasing rollout length. Default=100
             termination_fn (func, optional): termination function to output rollout done. Default=None
             real_ratio (float, optional): ratio of real samples for policy training. Default=0.05
             eval_ratio (float, optional): ratio of real samples for model evaluation. Default=0.2
@@ -83,10 +87,11 @@ class RAMBO(MBPO):
         super().__init__(
             obs_dim, act_dim, act_lim, ensemble_dim, hidden_dim, num_hidden, activation, 
             gamma, beta, polyak, tune_beta, clip_lv, rwd_clip_max, False, buffer_size, batch_size, 
-            rollout_batch_size, rollout_steps, topk, rollout_min_epoch, rollout_max_epoch, 
+            rollout_batch_size, rollout_min_steps, rollout_max_steps, rollout_min_epoch, rollout_max_epoch, topk,
             termination_fn, real_ratio, eval_ratio, m_steps, a_steps, lr_a, lr_c, lr_m, decay, grad_clip, device
         )
-        self.obs_penalty = obs_penalty
+        self.adv_penalty = adv_penalty
+        self.norm_advantage = norm_advantage
         self.plot_keys = [
             "eval_eps_return_avg", "eval_eps_len_avg", "critic_loss_avg", 
             "actor_loss_avg", "beta_avg", "adv_loss_avg", "obs_mae", 
@@ -124,8 +129,8 @@ class RAMBO(MBPO):
 
             advantage = rwd + (1 - done) * self.gamma * v_next - q
 
-            # normalize advantage
-            advantage = (advantage - advantage.mean(0)) / advantage.std(0)
+            if self.norm_advantage:
+                advantage = (advantage - advantage.mean(0)) / advantage.std(0)
         
         logp_rwd = self.compute_reward_log_prob(obs_norm, act, rwd_norm).sum(-1)
         logp_obs = self.compute_transition_log_prob(obs_norm, act, next_obs_norm).sum(-1)
@@ -139,7 +144,7 @@ class RAMBO(MBPO):
         adversarial_loss = self.compute_dynamics_adversarial_loss(real_batch)
         reward_loss = self.compute_reward_loss(real_batch)
         dynamics_loss = self.compute_dynamics_loss(real_batch)
-        total_loss = reward_loss + dynamics_loss + self.obs_penalty * adversarial_loss
+        total_loss = reward_loss + dynamics_loss + self.adv_penalty * adversarial_loss
         total_loss.backward()
 
         self.optimizers["dynamics"].step()
@@ -200,22 +205,16 @@ class RAMBO(MBPO):
 
     def train_policy(
         self, eval_env, max_steps, epochs, steps_per_epoch, sample_model_every, 
-        rwd_fn=None, num_eval_eps=0, eval_deterministic=True, callback=None, verbose=True
+        rwd_fn=None, num_eval_eps=0, eval_deterministic=True, callback=None, verbose=10
         ):
         logger = Logger()
-
-        total_steps = epochs * steps_per_epoch
         start_time = time.time()
-        
-        self.update_stats()
-        self.sample_imagined_data(
-            self.rollout_batch_size, self.rollout_steps, mix=False
-        )
+        total_steps = epochs * steps_per_epoch
         
         epoch = 0
         for t in range(total_steps):
             # train model
-            if (t + 1) % sample_model_every == 0:
+            if t == 0 or (t + 1) % sample_model_every == 0:
                 # generate imagined data
                 self.replay_buffer.clear()
                 rollout_steps = self.compute_rollout_steps(epoch + 1)
