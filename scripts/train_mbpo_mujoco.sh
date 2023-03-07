@@ -15,10 +15,11 @@ python train_mbpo_mujoco.py \
 --buffer_size 1000000 \
 --batch_size 200 \
 --rollout_batch_size 100000 \
---rollout_steps 10 \
---topk 5 \
+--rollout_min_steps 1 \
+--rollout_max_steps 10 \
 --rollout_min_epoch 20 \
 --rollout_max_epoch 150 \
+--topk 5 \
 --real_ratio 0.05 \
 --eval_ratio 0.2 \
 --m_steps 10 \
