@@ -17,13 +17,15 @@ python train_rambo_mujoco.py \
 --clip_lv True \
 --rwd_clip_max 5. \
 --obs_penalty 3e-4 \
+--norm_advantage True \
 --buffer_size 1000000 \
 --batch_size 200 \
 --rollout_batch_size 50000 \
---rollout_steps 5 \
---topk 5 \
+--rollout_min_steps 1 \
+--rollout_max_steps 5 \
 --rollout_min_epoch 50 \
 --rollout_max_epoch 200 \
+--topk 5 \
 --real_ratio 0.5 \
 --eval_ratio 0.2 \
 --m_steps 1000 \
