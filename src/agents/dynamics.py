@@ -1,10 +1,12 @@
+import time
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributions as torch_dist
 from src.agents.nn_models import EnsembleMLP
-from src.agents.rl_utils import normalize, denormalize
+from src.agents.rl_utils import normalize, denormalize, Logger
 
 def soft_clamp(x, _min, _max):
     x = _max - F.softplus(_max - x)
@@ -26,6 +28,7 @@ class EnsembleDynamics(nn.Module):
         clip_lv=False, 
         residual=False,
         termination_fn=None, 
+        max_mu=1e5,
         min_std=1e-5,
         max_std=1.6,
         device=torch.device("cpu")
@@ -44,6 +47,7 @@ class EnsembleDynamics(nn.Module):
             clip_lv (bool, optional): whether to soft clip observation log variance. Default=False
             residual (bool, optional): whether to predict observation residuals. Default=False
             termination_fn (func, optional): termination function to output rollout done. Default=None
+            max_mu (float): maximum mean prediction. Default=1e5
             min_std (float): minimum standard deviation. Default=1e-5
             max_std (float): maximum standard deviation. Default=1e-5
             device (torch.device): computing device. default=cpu
@@ -65,6 +69,7 @@ class EnsembleDynamics(nn.Module):
         self.clip_lv = clip_lv
         self.residual = residual
         self.termination_fn = termination_fn
+        self.max_mu = max_mu
         self.device = device
         
         self.mlp = EnsembleMLP(
@@ -101,6 +106,7 @@ class EnsembleDynamics(nn.Module):
             mu = obs.unsqueeze(-2) + mu_
         else:
             mu = mu_
+        mu = torch.clip(mu, -self.max_mu, self.max_mu)
 
         if self.clip_lv:
             std = torch.exp(soft_clamp(lv, self.min_lv, self.max_lv))
@@ -217,6 +223,173 @@ class EnsembleDynamics(nn.Module):
         topk_dist = np.zeros(self.ensemble_dim)
         topk_dist[idx_topk] = 1./self.topk
         self.topk_dist.data = torch.from_numpy(topk_dist).to(torch.float32).to(self.device)
+
+
+def train_ensemble(
+        data, agent, eval_ratio, batch_size, epochs, grad_clip=None, train_reward=True, 
+        update_stats=True, update_elites=True, max_epoch_since_update=10, 
+        verbose=1, callback=None, debug=False
+    ):
+    """
+    Args:
+        data (list): list of [obs, act, rwd, next_obs]
+        agent (nn.Module): agent with reward, dynamics, and optimizers properties
+        eval_ratio (float): evaluation ratio
+        epochs (int): max training epochs
+        grad_clip (float): gradient norm clipping. Default=None
+        train_reward (bool): whether to train reward. Default=True
+        update_stats (bool): whether to normalize data and update reward and dynamics model stats. Default=True
+        update_elites (bool): whether to update reward and dynamics topk_dist. Default=True
+        max_epoch_since_update (int): max epoch for termination condition. Default=10
+        verbose (int): verbose interval. Default=1
+        callback (object): callback object. Default=None
+        debug (bool): debug flag. If True will print data stats. Default=None
+
+    Returns:
+        logger (Logger): logger class with training history
+    """
+    obs, act, rwd, next_obs = data
+
+    # train test split
+    num_eval = int(len(obs) * eval_ratio)
+    obs_train = obs[:-num_eval]
+    act_train = act[:-num_eval]
+    rwd_train = rwd[:-num_eval]
+    next_obs_train = next_obs[:-num_eval]
+
+    obs_eval = obs[-num_eval:]
+    act_eval = act[-num_eval:]
+    rwd_eval = rwd[-num_eval:]
+    next_obs_eval = next_obs[-num_eval:]
+    
+    # normalize data
+    obs_mean, obs_var = 0., 1.
+    rwd_mean, rwd_var = 0., 1.
+    if update_stats:
+        obs_mean = obs_train.mean(0)
+        obs_var = obs_train.var(0)
+        rwd_mean = rwd_train.mean(0)
+        rwd_var = rwd_train.var(0)
+        agent.dynamics.update_stats(obs_mean, obs_var, obs_mean, obs_var)
+        if train_reward:
+            agent.reward.update_stats(obs_mean, obs_var, rwd_mean, rwd_var)
+
+    obs_train = normalize(obs_train, obs_mean, obs_var)
+    obs_eval = normalize(obs_eval, obs_mean, obs_var)
+    next_obs_train = normalize(next_obs_train, obs_mean, obs_var)
+    next_obs_eval = normalize(next_obs_eval, obs_mean, obs_var)
+    if train_reward:
+        rwd_train = normalize(rwd_train, rwd_mean, rwd_var)
+        rwd_eval = normalize(rwd_eval, rwd_mean, rwd_var)
+
+    if debug:
+        print("obs_train_mean", obs_train.mean(0).round(2))
+        print("obs_train_std", obs_train.std(0).round(2))
+        print("obs_eval_mean", obs_eval.mean(0).round(2))
+        print("obs_eval_std", obs_eval.std(0).round(2))
+        print("next_obs_train_mean", next_obs_train.mean(0).round(2))
+        print("next_obs_train_std", next_obs_train.std(0).round(2))
+        print("next_obs_eval_mean", next_obs_eval.mean(0).round(2))
+        print("next_obs_eval_std", next_obs_eval.std(0).round(2))
+        
+        print()
+        print("rwd_train_mean", rwd_train.mean(0).round(2))
+        print("rwd_train_std", rwd_train.std(0).round(2))
+        print("rwd_eval_mean", rwd_eval.mean(0).round(2))
+        print("rwd_eval_std", rwd_eval.std(0).round(2))
+    
+    # pack eval data
+    obs_eval = torch.from_numpy(obs_eval).to(torch.float32).to(agent.device)
+    act_eval = torch.from_numpy(act_eval).to(torch.float32).to(agent.device)
+    rwd_eval = torch.from_numpy(rwd_eval).to(torch.float32).to(agent.device)
+    next_obs_eval = torch.from_numpy(next_obs_eval).to(torch.float32).to(agent.device)
+    
+    logger = Logger()
+    start_time = time.time()
+    best_eval = 1e6
+    epoch_since_last_update = 0
+    for e in range(epochs):
+        # shuffle train data
+        idx_train = np.arange(len(obs_train))
+        np.random.shuffle(idx_train)
+
+        train_stats_epoch = []
+        for i in range(0, obs_train.shape[0], batch_size):
+            idx_batch = idx_train[i:i+batch_size]
+            obs_batch = torch.from_numpy(obs_train[idx_batch]).to(torch.float32).to(agent.device)
+            act_batch = torch.from_numpy(act_train[idx_batch]).to(torch.float32).to(agent.device)
+            rwd_batch = torch.from_numpy(rwd_train[idx_batch]).to(torch.float32).to(agent.device)
+            next_obs_batch = torch.from_numpy(next_obs_train[idx_batch]).to(torch.float32).to(agent.device)
+            
+            obs_loss = agent.dynamics.compute_loss(obs_batch, act_batch, next_obs_batch)
+            total_loss = obs_loss
+            stats = {"obs_loss": obs_loss.cpu().data.item()}
+            if train_reward:
+                rwd_loss = agent.reward.compute_loss(obs_batch, act_batch, rwd_batch)
+                total_loss += rwd_loss
+                stats["rwd_loss"] = rwd_loss.cpu().data.item()
+
+            total_loss.backward()
+            if grad_clip is not None:
+                nn.utils.clip_grad_norm_(agent.parameters(), grad_clip)
+            agent.optimizers["dynamics"].step()
+            agent.optimizers["dynamics"].zero_grad()
+            if train_reward:
+                agent.optimizers["reward"].step()
+                agent.optimizers["reward"].zero_grad()
+
+            train_stats_epoch.append(stats)
+            logger.push(stats)
+        train_stats_epoch = pd.DataFrame(train_stats_epoch).mean(0).to_dict()
+        
+        # evaluate
+        obs_eval_stats_epoch = agent.dynamics.evaluate(obs_eval, act_eval, next_obs_eval)
+        obs_eval_stats_epoch = {"obs_" + k: v for k, v in obs_eval_stats_epoch.items()}
+        eval_stats_epoch = obs_eval_stats_epoch
+        if update_elites:
+            agent.dynamics.update_topk_dist(obs_eval_stats_epoch)
+        if train_reward:
+            rwd_eval_stats_epoch = agent.reward.evaluate(obs_eval, act_eval, rwd_eval)
+            rwd_eval_stats_epoch = {"rwd_" + k: v for k, v in rwd_eval_stats_epoch.items()}
+            eval_stats_epoch = {**eval_stats_epoch, **rwd_eval_stats_epoch}
+            if update_elites:
+                agent.reward.update_topk_dist(rwd_eval_stats_epoch)
+
+        # log stats
+        stats_epoch = {**train_stats_epoch, **eval_stats_epoch}
+        logger.push(stats_epoch)
+        logger.push({"epoch": e + 1})
+        logger.push({"time": time.time() - start_time})
+        logger.log(silent=True)
+        
+        if callback is not None:
+            callback(agent, pd.DataFrame(logger.history))
+        
+        if (e + 1) % verbose == 0:
+            print("e: {}, obs_loss: {:.4f}, obs_mae: {:.4f}, rwd_loss: {:.4f}, rwd_mae: {:.4f}, terminate: {}/{}".format(
+                e + 1, 
+                stats_epoch["obs_loss"], 
+                stats_epoch["obs_mae"],
+                0. if not train_reward else stats_epoch["rwd_loss"],
+                0. if not train_reward else stats_epoch["rwd_mae"],
+                epoch_since_last_update,
+                max_epoch_since_update,
+                ))
+        
+        # termination condition based on eval performance
+        current_eval = stats_epoch["obs_mae"]
+        if train_reward:
+            current_eval += stats_epoch["rwd_mae"]
+        improvement = (best_eval - current_eval) / (best_eval + 1e-6)
+        best_eval = min(best_eval, current_eval)
+        if improvement > 0.01:
+            epoch_since_last_update = 0
+        else:
+            epoch_since_last_update += 1
+         
+        if epoch_since_last_update > max_epoch_since_update:
+            break
+    return logger
 
 if __name__ == "__main__":
     torch.manual_seed(0)
