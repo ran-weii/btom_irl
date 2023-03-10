@@ -42,8 +42,10 @@ def parse_args():
     parser.add_argument("--rwd_clip_max", type=float, default=10., help="clip reward max value, default=10.")
     parser.add_argument("--adv_penalty", type=float, default=3e-4, help="model advantage penalty, default=3e-4")
     parser.add_argument("--norm_advantage", type=bool_, default=True, help="whether to normalize advantage, default=True")
+    parser.add_argument("--update_critic_adv", type=bool_, default=False, help="whether to update critic during model training, default=False")
     # training args
     parser.add_argument("--buffer_size", type=int, default=1e6, help="replay buffer size, default=1e6")
+    parser.add_argument("--model_retain_epochs", type=int, default=1, help="number of epochs to retain model samples, default=1")
     parser.add_argument("--batch_size", type=int, default=200, help="training batch size, default=200")
     parser.add_argument("--rollout_batch_size", type=int, default=10000, help="model rollout batch size, default=10000")
     parser.add_argument("--rollout_min_steps", type=int, default=1, help="min dynamics rollout steps, default=1")
@@ -113,17 +115,19 @@ def main(arglist):
     terminated = terminated[idx]
     
     # normalize data
-    obs_mean = obs.mean(0)
-    obs_std = obs.std(0)
-
-    rwd_mean = rwd.mean(0)
-    rwd_std = rwd.std(0)
-    
+    obs_mean = 0.
+    obs_std = 1.
     if arglist["norm_obs"]:
+        obs_mean = obs.mean(0)
+        obs_std = obs.std(0)
         obs = (obs - obs_mean) / obs_std
         next_obs = (next_obs - obs_mean) / obs_std
     
+    rwd_mean = 0.
+    rwd_std = 1.
     if arglist["norm_rwd"]:
+        rwd_mean = rwd.mean(0)
+        rwd_std = rwd.std(0)
         rwd = (rwd - rwd_mean) / rwd_std
     
     print("processed data stats")
@@ -158,7 +162,9 @@ def main(arglist):
         rwd_clip_max=arglist["rwd_clip_max"], 
         adv_penalty=arglist["adv_penalty"], 
         norm_advantage=arglist["norm_advantage"],
+        update_critic_adv=arglist["update_critic_adv"],
         buffer_size=arglist["buffer_size"], 
+        model_retain_epochs=arglist["model_retain_epochs"],
         batch_size=arglist["batch_size"], 
         rollout_batch_size=arglist["rollout_batch_size"], 
         rollout_min_steps=arglist["rollout_min_steps"], 
