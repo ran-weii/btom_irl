@@ -2,28 +2,29 @@
 python train_mbpo_mujoco.py \
 --cp_path "none" \
 --ensemble_dim 7 \
---hidden_dim 128 \
+--topk 5 \
+--hidden_dim 200 \
 --num_hidden 2 \
 --activation relu \
 --gamma 0.99 \
 --beta 0.2 \
 --polyak 0.995 \
---tune_beta True \
+--tune_beta False \
 --clip_lv False \
+--residual False \
 --rwd_clip_max 10. \
 --norm_obs True \
 --buffer_size 1000000 \
---model_retain_epochs 1 \
 --batch_size 200 \
---rollout_batch_size 100000 \
+--rollout_batch_size 50000 \
 --rollout_min_steps 1 \
 --rollout_max_steps 10 \
 --rollout_min_epoch 20 \
 --rollout_max_epoch 150 \
---topk 5 \
+--model_retain_epochs 4 \
 --real_ratio 0.05 \
 --eval_ratio 0.2 \
---m_steps 10 \
+--m_steps 20 \
 --a_steps 20 \
 --lr_a 0.001 \
 --lr_c 0.001 \
@@ -31,7 +32,7 @@ python train_mbpo_mujoco.py \
 --decay "0.000025, 0.00005, 0.000075, 0.0001" \
 --grad_clip 100. \
 --env_name "Hopper-v4" \
---epochs 500 \
+--epochs 1000 \
 --max_steps 1000 \
 --steps_per_epoch 1000 \
 --update_after 5000 \
@@ -40,7 +41,7 @@ python train_mbpo_mujoco.py \
 --cp_every 10 \
 --num_eval_eps 5 \
 --eval_deterministic True \
---verbose 20 \
+--verbose 50 \
 --render False \
 --save False \
 --seed 0
