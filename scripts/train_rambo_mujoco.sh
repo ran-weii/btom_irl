@@ -4,7 +4,7 @@ python train_rambo_mujoco.py \
 --cp_path "none" \
 --dynamics_path "../exp/dynamics/02-21-2023 22-25-32" \
 --num_samples 100000 \
---norm_obs True \
+--norm_obs False \
 --norm_rwd False \
 --ensemble_dim 7 \
 --hidden_dim 128 \
@@ -18,7 +18,9 @@ python train_rambo_mujoco.py \
 --rwd_clip_max 5. \
 --adv_penalty 3e-4 \
 --norm_advantage True \
+--update_critic_adv False \
 --buffer_size 1000000 \
+--model_retain_epochs 1 \
 --batch_size 200 \
 --rollout_batch_size 50000 \
 --rollout_min_steps 1 \
