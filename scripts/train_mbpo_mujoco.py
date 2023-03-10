@@ -34,6 +34,7 @@ def parse_args():
     parser.add_argument("--norm_obs", type=bool_, default=False, help="whether to normalize observation, default=False")
     # training args
     parser.add_argument("--buffer_size", type=int, default=1e6, help="replay buffer size, default=1e6")
+    parser.add_argument("--model_retain_epochs", type=int, default=1, help="number of epochs to retain model samples, default=1")
     parser.add_argument("--batch_size", type=int, default=200, help="training batch size, default=200")
     parser.add_argument("--rollout_batch_size", type=int, default=10000, help="model rollout batch size, default=10000")
     parser.add_argument("--rollout_min_steps", type=int, default=1, help="min dynamics rollout steps, default=1")
@@ -106,6 +107,7 @@ def main(arglist):
         rwd_clip_max=arglist["rwd_clip_max"], 
         norm_obs=arglist["norm_obs"], 
         buffer_size=arglist["buffer_size"], 
+        model_retain_epochs=arglist["model_retain_epochs"],
         batch_size=arglist["batch_size"], 
         rollout_batch_size=arglist["rollout_batch_size"], 
         rollout_min_steps=arglist["rollout_min_steps"], 

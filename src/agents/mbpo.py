@@ -30,6 +30,7 @@ class MBPO(SAC):
         rwd_clip_max=10., 
         norm_obs=False, 
         buffer_size=1e6, 
+        model_retain_epochs=5,
         batch_size=200, 
         rollout_batch_size=10000, 
         rollout_min_steps=1, 
@@ -66,6 +67,7 @@ class MBPO(SAC):
             rwd_clip_max (float, optional): clip reward max value. Default=10.
             norm_obs (bool, optional): whether to normalize observation. Default=False
             buffer_size (int, optional): replay buffer size. Default=1e6
+            model_retain_epochs (int, optional): number of epochs to keep model samples. Default=5
             batch_size (int, optional): actor and critic batch size. Default=100
             rollout_batch_size (int, optional): model_rollout batch size. Default=10000
             rollout_min_steps (int, optional): initial model rollout steps. Default=1
@@ -95,6 +97,7 @@ class MBPO(SAC):
         self.rwd_clip_max = rwd_clip_max
         self.norm_obs = norm_obs
         
+        self.model_retain_epochs = model_retain_epochs
         self.rollout_batch_size = rollout_batch_size
         self.rollout_min_steps = rollout_min_steps
         self.rollout_max_steps = rollout_max_steps
@@ -156,8 +159,8 @@ class MBPO(SAC):
         if not self.clip_lv:
             std = torch.exp(lv.clip(np.log(1e-5), np.log(3)))
         else:
-            lv = self.max_model_lv - F.softplus(self.max_model_lv[0] - lv)
-            lv = self.min_model_lv + F.softplus(lv - self.min_model_lv[0])
+            lv = self.max_model_lv[0] - F.softplus(self.max_model_lv[0] - lv)
+            lv = self.min_model_lv[0] + F.softplus(lv - self.min_model_lv[0])
             std = torch.exp(lv)
         return torch_dist.Normal(mu, std)
     
@@ -290,7 +293,7 @@ class MBPO(SAC):
         self.dynamics.eval()
         return stats
 
-    def train_model_epoch(self, steps, logger=None, verbose=False):
+    def train_model_epoch(self, steps, max_epoch_since_update=5, logger=None, verbose=False):
         # train test split
         num_eval = int(self.eval_ratio * self.real_buffer.size)
         data = self.real_buffer.sample(self.real_buffer.size)
@@ -341,7 +344,7 @@ class MBPO(SAC):
             else:
                 epoch_since_last_update += 1
             
-            if epoch_since_last_update > 5:
+            if epoch_since_last_update > max_epoch_since_update:
                 break
 
             if verbose:
@@ -470,7 +473,7 @@ class MBPO(SAC):
     def train_policy(
         self, env, eval_env, max_steps, epochs, steps_per_epoch, update_after, 
         update_model_every, update_policy_every, rwd_fn=None, 
-        num_eval_eps=0, eval_deterministic=True, callback=None, verbose=True
+        num_eval_eps=0, eval_deterministic=True, callback=None, verbose=50
         ):
         logger = Logger()
 
@@ -519,12 +522,15 @@ class MBPO(SAC):
                     print(f"e: {epoch + 1}, t model: {t + 1}, {round_loss_dict}")
                 
                 # generate imagined data
-                self.replay_buffer.clear()
+                # self.replay_buffer.clear()
                 rollout_steps = self.compute_rollout_steps(epoch + 1)
+                self.replay_buffer.max_size = min(
+                    self.buffer_size, int(self.model_retain_epochs * self.rollout_batch_size * rollout_steps)
+                )
                 self.sample_imagined_data(
                     self.rollout_batch_size, rollout_steps, mix=False
                 )
-                print("epoch", epoch + 1, "real buffer size", self.real_buffer.size, "rollout steps", rollout_steps)
+                print("epoch", epoch + 1, "real buffer size", self.real_buffer.size, "fake buffer size", self.replay_buffer.size, "rollout steps", rollout_steps)
 
             # train policy
             if (t + 1) > update_after and (t - update_after + 1) % update_policy_every == 0:

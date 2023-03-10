@@ -13,6 +13,7 @@ python train_mbpo_mujoco.py \
 --rwd_clip_max 10. \
 --norm_obs True \
 --buffer_size 1000000 \
+--model_retain_epochs 1 \
 --batch_size 200 \
 --rollout_batch_size 100000 \
 --rollout_min_steps 1 \
