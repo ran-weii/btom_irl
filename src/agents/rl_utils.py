@@ -146,7 +146,7 @@ class ReplayBuffer:
         self.size += batch_size
 
         if self.size > self.max_size:
-            size_diff = self.size - self.max_size
+            size_diff = int(self.size - self.max_size)
             
             self.obs = self.obs[size_diff:]
             self.act = self.act[size_diff:]
