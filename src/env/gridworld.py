@@ -9,8 +9,8 @@ class Gridworld(gym.Env):
     def __init__(
         self, 
         num_grids, 
-        init_pos=np.array([]), 
-        goal_pos=np.array([]), 
+        init_specs={},
+        goal_specs={},
         epsilon=0.,
         init_dist=None,
         target_dist=None,
@@ -18,8 +18,8 @@ class Gridworld(gym.Env):
         """
         Args:
             num_grids (int): number of grids per side
-            init_post (np.array): initial state positions. default is uniform except goal states. size=[n, 2]
-            goal_post (np.array): goal state positions. default is upper right. size=[n, 2]
+            init_specs (dict): initial state specifications. keys are position tuples, values are probabilities. if empty use default uniform initial state.
+            goal_specs (dict): goal state specifications. keys are position tuples, values are probabilities. if empty use upper right goal.
             epsilon (float): transition error. Default=0.
             init_dist (torch.tensor): initial state distribution. size=[state_dim]
             target_dist (torch.tensor): target state distribution. size=[state_dim]
@@ -39,12 +39,16 @@ class Gridworld(gym.Env):
         self.state2pos = np.array(state2pos).reshape(self.state_dim, -1).astype(int)
 
         # target distribution
-        if len(goal_pos) == 0:
+        if len(goal_specs) == 0: # default one goal
             goal_pos = np.array([[num_grids - 1, num_grids - 1]])
+            p_goal = np.array([[1.]])
+        else:
+            goal_pos = np.array(list(goal_specs.keys()))
+            p_goal = np.array(list(goal_specs.values()))
         self.goal_states = np.stack([self.pos2state(p) for p in goal_pos])
 
         self.target_dist = np.zeros(self.state_dim)
-        self.target_dist[self.goal_states] = 1./len(self.goal_states)
+        self.target_dist[self.goal_states.flatten()] = p_goal
 
         if target_dist is not None: # init target_dist from input
             assert isinstance(target_dist, np.ndarray)
@@ -53,14 +57,17 @@ class Gridworld(gym.Env):
         self.reward_matrix = np.log(self.target_dist + 1e-6)
         
         # initial state distribution
-        if len(init_pos) == 0:
+        if len(init_specs) == 0: # default uniform
             init_states = np.ones(self.state_dim)
             init_states[self.goal_states] = 0.
             self.init_states = np.where(init_states == 1)[0]
+            p_init = 1 / (self.state_dim - len(self.goal_states))
         else:
+            init_pos = np.array(list(init_specs.keys()))
             self.init_states = np.stack([self.pos2state(p) for p in init_pos])
+            p_init = np.array(list(init_specs.values()))
         self.init_dist = np.zeros(self.state_dim)
-        self.init_dist[self.init_states] = 1./len(self.init_states)
+        self.init_dist[self.init_states.flatten()] = p_init
         
         if init_dist is not None: # init init_dist from input
             assert isinstance(init_dist, np.ndarray)
@@ -140,16 +147,12 @@ if __name__ == "__main__":
     np.random.seed(0)
     
     num_grids = 5
-    init_pos = np.array([
-        [0, 0], [0, 1], [1, 0]
-    ])
-    goal_pos = np.array([
-        [0, 4], [4, 0], [4, 4]
-    ])
+    init_specs = {}
+    goal_specs = {}
     epsilon = 0.1
     
     # test env
-    env = Gridworld(num_grids, init_pos=init_pos, goal_pos=goal_pos, epsilon=epsilon)
+    env = Gridworld(num_grids, init_specs, goal_specs, epsilon=epsilon)
 
     obs = env.reset()
     next_obs, _, _, _ = env.step(1)
@@ -161,8 +164,8 @@ if __name__ == "__main__":
     
     # test vectorized env
     env = gym.vector.AsyncVectorEnv([
-        lambda: Gridworld(num_grids, init_pos=init_pos, goal_pos=goal_pos, epsilon=epsilon),
-        lambda: Gridworld(num_grids, init_pos=init_pos, goal_pos=goal_pos, epsilon=epsilon)
+        lambda: Gridworld(num_grids, init_specs, goal_specs, epsilon=epsilon),
+        lambda: Gridworld(num_grids, init_specs, goal_specs, epsilon=epsilon)
     ])
     
     obs = env.reset()
