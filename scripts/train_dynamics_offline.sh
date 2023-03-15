@@ -1,19 +1,23 @@
 #! /bin/bash
 python train_dynamics_offline.py \
 --filename "hopper-medium-expert-v2.p" \
+--cp_path "none" \
+--num_samples 100000 \
 --ensemble_dim 7 \
---hidden_dim 128 \
+--topk 5 \
+--hidden_dim 200 \
 --num_hidden 2 \
 --activation relu \
---clip_lv False \
---num_samples 100000 \
+--clip_lv True \
+--residual False \
 --eval_ratio 0.2 \
---batch_size 200 \
+--batch_size 256 \
 --lr 1e-3 \
 --decay "0.000025, 0.00005, 0.000075, 0.0001" \
 --grad_clip 100. \
---epochs 200 \
+--epochs 300 \
+--max_epochs_since_update 10 \
 --cp_every 10 \
---verbose True \
+--verbose 1 \
 --save False \
 --seed 0

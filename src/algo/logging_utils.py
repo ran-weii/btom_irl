@@ -22,14 +22,16 @@ def plot_history(df_history, plot_keys, plot_std=True):
     fig, ax = plt.subplots(1, num_cols, figsize=(width, 4))
     for i in range(num_cols):
         ax[i].plot(df_history["epoch"], df_history[plot_keys[i]])
-        if plot_std and plot_keys[i].replace("_avg", "_std") in df_history.columns:
-            std = df_history[plot_keys[i].replace("_avg", "_std")]
-            ax[i].fill_between(
-                df_history["epoch"],
-                df_history[plot_keys[i]] - std,
-                df_history[plot_keys[i]] + std,
-                alpha=0.4
-            )
+        if plot_std:
+            key = plot_keys[i].replace("_avg", "")
+            if key + "_std" in df_history.columns:
+                std = df_history[key + "_std"]
+                ax[i].fill_between(
+                    df_history["epoch"],
+                    df_history[plot_keys[i]] - std,
+                    df_history[plot_keys[i]] + std,
+                    alpha=0.4
+                )
 
         ax[i].set_xlabel("epoch")
         ax[i].set_title(plot_keys[i])
@@ -65,16 +67,12 @@ class SaveCallback:
         self.cp_every = arglist["cp_every"]
         self.iter = 0
 
-    def __call__(self, model, logger):
+    def __call__(self, model, df_history):
         self.iter += 1
         if self.iter % self.cp_every != 0:
             return
         
-        # save history
-        df_history = pd.DataFrame(logger.history)
         self.save_history(df_history)
-        
-        # save model
         self.save_checkpoint(model, os.path.join(self.model_path, f"model_{self.iter}.pt"))
     
     def save_history(self, df_history):

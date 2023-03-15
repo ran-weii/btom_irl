@@ -8,6 +8,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import torch 
 
+from src.agents.dynamics import EnsembleDynamics
 from src.agents.mbpo import MBPO
 from src.env.gym_wrapper import get_termination_fn
 from src.algo.logging_utils import SaveCallback
@@ -22,29 +23,30 @@ def parse_args():
     parser.add_argument("--cp_path", type=str, default="none", help="checkpoint path, default=none")
     # algo args
     parser.add_argument("--ensemble_dim", type=int, default=7, help="ensemble size, default=7")
-    parser.add_argument("--hidden_dim", type=int, default=128, help="neural network hidden dims, default=64")
+    parser.add_argument("--topk", type=int, default=5, help="top k models to perform rollout, default=5")
+    parser.add_argument("--hidden_dim", type=int, default=200, help="neural network hidden dims, default=200")
     parser.add_argument("--num_hidden", type=int, default=2, help="number of hidden layers, default=2")
     parser.add_argument("--activation", type=str, default="relu", help="neural network activation, default=relu")
-    parser.add_argument("--gamma", type=float, default=0.99, help="trainer discount factor, default=0.9")
-    parser.add_argument("--beta", type=float, default=0.2, help="softmax temperature, default=0.1")
+    parser.add_argument("--gamma", type=float, default=0.99, help="trainer discount factor, default=0.99")
+    parser.add_argument("--beta", type=float, default=0.2, help="softmax temperature, default=0.2")
     parser.add_argument("--polyak", type=float, default=0.995, help="polyak averaging factor, default=0.995")
     parser.add_argument("--tune_beta", type=bool_, default=True, help="whether to tune beta, default=True")
-    parser.add_argument("--clip_lv", type=bool_, default=False, help="whether to clip observation variance, default=False")
+    parser.add_argument("--clip_lv", type=bool_, default=True, help="whether to clip observation variance, default=True")
+    parser.add_argument("--residual", type=bool_, default=False, help="whether to predict observation residual, default=False")
     parser.add_argument("--rwd_clip_max", type=float, default=10., help="clip reward max value, default=10.")
-    parser.add_argument("--norm_obs", type=bool_, default=False, help="whether to normalize observation, default=False")
+    parser.add_argument("--norm_obs", type=bool_, default=True, help="whether to normalize observation, default=True")
     # training args
     parser.add_argument("--buffer_size", type=int, default=1e6, help="replay buffer size, default=1e6")
-    parser.add_argument("--model_retain_epochs", type=int, default=1, help="number of epochs to retain model samples, default=1")
-    parser.add_argument("--batch_size", type=int, default=200, help="training batch size, default=200")
-    parser.add_argument("--rollout_batch_size", type=int, default=10000, help="model rollout batch size, default=10000")
+    parser.add_argument("--batch_size", type=int, default=256, help="training batch size, default=256")
+    parser.add_argument("--rollout_batch_size", type=int, default=50000, help="model rollout batch size, default=50000")
     parser.add_argument("--rollout_min_steps", type=int, default=1, help="min dynamics rollout steps, default=1")
     parser.add_argument("--rollout_max_steps", type=int, default=10, help="max dynamics rollout steps, default=10")
     parser.add_argument("--rollout_min_epoch", type=int, default=20, help="epoch to start increasing rollout steps, default=20")
     parser.add_argument("--rollout_max_epoch", type=int, default=100, help="epoch to stop increasing rollout steps, default=100")
-    parser.add_argument("--topk", type=int, default=5, help="top k models to perform rollout, default=5")
+    parser.add_argument("--model_retain_epochs", type=int, default=1, help="number of epochs to retain model samples, default=1")
     parser.add_argument("--real_ratio", type=float, default=0.05, help="ratio of real samples for policy training, default=0.05")
     parser.add_argument("--eval_ratio", type=float, default=0.2, help="ratio of real samples for model evaluation, default=0.2")
-    parser.add_argument("--m_steps", type=int, default=100, help="model training steps per update, default=100")
+    parser.add_argument("--m_steps", type=int, default=50, help="model training steps per update, default=50")
     parser.add_argument("--a_steps", type=int, default=50, help="policy training steps per update, default=50")
     parser.add_argument("--lr_a", type=float, default=0.001, help="actor learning rate, default=0.001")
     parser.add_argument("--lr_c", type=float, default=0.001, help="critic learning rate, default=0.001")
@@ -85,17 +87,50 @@ def main(arglist):
         render_mode=render_mode
     )
     env.np_random = gym.utils.seeding.np_random(arglist["seed"])[0]
-
+    
+    # init agent
     obs_dim = env.observation_space.low.shape[0]
     act_dim = env.action_space.low.shape[0]
     act_lim = torch.from_numpy(env.action_space.high).to(torch.float32)
     termination_fn = get_termination_fn(arglist["env_name"])
-
+    
+    reward = EnsembleDynamics(
+        obs_dim,
+        act_dim,
+        1,
+        arglist["ensemble_dim"],
+        arglist["topk"],
+        arglist["hidden_dim"],
+        arglist["num_hidden"],
+        arglist["activation"],
+        arglist["decay"],
+        clip_lv=arglist["clip_lv"],
+        residual=False,
+        termination_fn=None,
+        max_mu=arglist["rwd_clip_max"],
+        device=device
+    )
+    dynamics = EnsembleDynamics(
+        obs_dim,
+        act_dim,
+        obs_dim,
+        arglist["ensemble_dim"],
+        arglist["topk"],
+        arglist["hidden_dim"],
+        arglist["num_hidden"],
+        arglist["activation"],
+        arglist["decay"],
+        clip_lv=arglist["clip_lv"],
+        residual=arglist["residual"],
+        termination_fn=termination_fn,
+        device=device
+    )
     agent = MBPO(
+        reward,
+        dynamics,
         obs_dim, 
         act_dim, 
         act_lim, 
-        arglist["ensemble_dim"], 
         arglist["hidden_dim"], 
         arglist["num_hidden"], 
         arglist["activation"],
@@ -103,19 +138,15 @@ def main(arglist):
         beta=arglist["beta"], 
         polyak=arglist["polyak"], 
         tune_beta=arglist["tune_beta"], 
-        clip_lv=arglist["clip_lv"], 
-        rwd_clip_max=arglist["rwd_clip_max"], 
         norm_obs=arglist["norm_obs"], 
         buffer_size=arglist["buffer_size"], 
-        model_retain_epochs=arglist["model_retain_epochs"],
         batch_size=arglist["batch_size"], 
         rollout_batch_size=arglist["rollout_batch_size"], 
         rollout_min_steps=arglist["rollout_min_steps"], 
         rollout_max_steps=arglist["rollout_max_steps"], 
         rollout_min_epoch=arglist["rollout_min_epoch"], 
         rollout_max_epoch=arglist["rollout_max_epoch"], 
-        topk=arglist["topk"],
-        termination_fn=termination_fn, 
+        model_retain_epochs=arglist["model_retain_epochs"],
         real_ratio=arglist["real_ratio"], 
         eval_ratio=arglist["eval_ratio"], 
         m_steps=arglist["m_steps"], 
@@ -123,7 +154,6 @@ def main(arglist):
         lr_a=arglist["lr_a"], 
         lr_c=arglist["lr_c"], 
         lr_m=arglist["lr_m"], 
-        decay=arglist["decay"], 
         grad_clip=arglist["grad_clip"], 
         device=device,
     )
@@ -163,10 +193,19 @@ def main(arglist):
     eval_env.np_random = gym.utils.seeding.np_random(arglist["seed"])[0]
 
     logger = agent.train_policy(
-        env, eval_env, arglist["max_steps"], arglist["epochs"], arglist["steps_per_epoch"],
-        arglist["update_after"], arglist["update_model_every"], arglist["update_policy_every"], 
-        rwd_fn=None, num_eval_eps=arglist["num_eval_eps"], eval_deterministic=arglist["eval_deterministic"], 
-        callback=callback, verbose=arglist["verbose"]
+        env, 
+        eval_env, 
+        arglist["max_steps"], 
+        arglist["epochs"], 
+        arglist["steps_per_epoch"],
+        arglist["update_after"], 
+        arglist["update_model_every"], 
+        arglist["update_policy_every"], 
+        rwd_fn=None, 
+        num_eval_eps=arglist["num_eval_eps"], 
+        eval_deterministic=arglist["eval_deterministic"], 
+        callback=callback, 
+        verbose=arglist["verbose"]
     )
 
     if arglist["save"]:

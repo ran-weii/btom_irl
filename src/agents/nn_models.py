@@ -10,21 +10,13 @@ class EnsembleLinear(nn.Module):
         self.output_dim = output_dim
         self.ensemble_dim = ensemble_dim
 
-        self.weight = nn.Parameter(torch.randn(ensemble_dim, output_dim, input_dim))
-        self.bias = nn.Parameter(torch.randn(ensemble_dim, output_dim))
-
-        self.reset_parameters()
+        self.weight = nn.Parameter(torch.zeros(ensemble_dim, input_dim, output_dim))
+        self.bias = nn.Parameter(torch.zeros(ensemble_dim, output_dim))
+        nn.init.trunc_normal_(self.weight, std=1/(2*input_dim**0.5))
     
-    def reset_parameters(self):
-        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-
-        fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
-        bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
-        nn.init.uniform_(self.bias, -bound, bound)
-
     def forward(self, x):
         """ Output size=[..., ensemble_dim, output_dim] """
-        out = torch.einsum("koi, ...ki -> ...ko", self.weight, x) + self.bias
+        out = torch.einsum("kio, ...ki -> ...ko", self.weight, x) + self.bias
         return out
 
 

@@ -2,23 +2,20 @@ import time
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.distributions as torch_dist
 
 from src.agents.sac import SAC
-from src.agents.nn_models import EnsembleMLP
+from src.agents.dynamics import train_ensemble
 from src.agents.rl_utils import ReplayBuffer, Logger
-from src.agents.rl_utils import normalize, denormalize
 
 class MBPO(SAC):
     """ Model-based policy optimization """
     def __init__(
         self, 
+        reward,
+        dynamics,
         obs_dim, 
         act_dim, 
         act_lim, 
-        ensemble_dim, 
         hidden_dim, 
         num_hidden, 
         activation, 
@@ -26,19 +23,15 @@ class MBPO(SAC):
         beta=0.2, 
         polyak=0.995, 
         tune_beta=True, 
-        clip_lv=False, 
-        rwd_clip_max=10., 
-        norm_obs=False, 
+        norm_obs=True,
         buffer_size=1e6, 
-        model_retain_epochs=5,
         batch_size=200, 
         rollout_batch_size=10000, 
         rollout_min_steps=1, 
         rollout_max_steps=10, 
         rollout_min_epoch=20, 
         rollout_max_epoch=100,
-        topk=5,  
-        termination_fn=None, 
+        model_retain_epochs=5,
         real_ratio=0.05, 
         eval_ratio=0.2, 
         m_steps=100, 
@@ -46,16 +39,16 @@ class MBPO(SAC):
         lr_a=0.001, 
         lr_c=0.001, 
         lr_m=0.001, 
-        decay=None, 
         grad_clip=None,
         device=torch.device("cpu")
         ):
         """
         Args:
+            reward (EnsembleDynamics): reward function as an EnsembleDynamics object
+            dynamics (EnsembleDynamics): transition function as an EnsembleDynamics object
             obs_dim (int): observation dimension
             act_dim (int): action dimension
             act_lim (torch.tensor): action limits
-            ensemble_dim (int): number of ensemble models
             hidden_dim (int): value network hidden dim
             num_hidden (int): value network hidden layers
             activation (str): value network activation
@@ -63,19 +56,15 @@ class MBPO(SAC):
             beta (float, optional): softmax temperature. Default=0.2
             polyak (float, optional): target network polyak averaging factor. Default=0.995
             tune_beta (bool, optional): whether to automatically tune temperature. Default=True
-            clip_lv (bool, optional): whether to soft clip observation log variance. Default=False
-            rwd_clip_max (float, optional): clip reward max value. Default=10.
-            norm_obs (bool, optional): whether to normalize observation. Default=False
+            norm_obs (bool, optional): whether to normalize observations. Default=True
             buffer_size (int, optional): replay buffer size. Default=1e6
-            model_retain_epochs (int, optional): number of epochs to keep model samples. Default=5
             batch_size (int, optional): actor and critic batch size. Default=100
             rollout_batch_size (int, optional): model_rollout batch size. Default=10000
             rollout_min_steps (int, optional): initial model rollout steps. Default=1
             rollout_max_steps (int, optional): maximum model rollout steps. Default=10
             rollout_min_epoch (int, optional): epoch to start increasing rollout length. Default=20
             rollout_max_epoch (int, optional): epoch to stop increasing rollout length. Default=100
-            topk (int, optional): top k models to perform rollout. Default=5
-            termination_fn (func, optional): termination function to output rollout done. Default=None
+            model_retain_epochs (int, optional): number of epochs to keep model samples. Default=5
             real_ratio (float, optional): ratio of real samples for policy training. Default=0.05
             eval_ratio (float, optional): ratio of real samples for model evaluation. Default=0.2
             m_steps (int, optional): model update steps per training step. Default=100
@@ -83,7 +72,6 @@ class MBPO(SAC):
             lr_a (float, optional): actor learning rate. Default=1e-3
             lr_c (float, optional): critic learning rate. Default=1e-3
             lr_m (float, optional): model learning rate. Default=1e-3
-            decay ([list, None], optional): weight decay for each dynamics and reward model layer. Default=None.
             grad_clip (float, optional): gradient clipping. Default=None
             device (optional): training device. Default=cpu
         """
@@ -92,35 +80,19 @@ class MBPO(SAC):
             gamma, beta, polyak, tune_beta, buffer_size, batch_size, a_steps, 
             lr_a, lr_c, grad_clip, device
         )
-        self.ensemble_dim = ensemble_dim
-        self.clip_lv = clip_lv
-        self.rwd_clip_max = rwd_clip_max
         self.norm_obs = norm_obs
-        
-        self.model_retain_epochs = model_retain_epochs
         self.rollout_batch_size = rollout_batch_size
         self.rollout_min_steps = rollout_min_steps
         self.rollout_max_steps = rollout_max_steps
         self.rollout_min_epoch = rollout_min_epoch # used to calculate rollout steps
         self.rollout_max_epoch = rollout_max_epoch # used to calculate rollout steps
-        self.topk = topk
-        self.topk_dist = torch.ones(ensemble_dim) / ensemble_dim # model selection distribution
-        self.termination_fn = termination_fn
+        self.model_retain_epochs = model_retain_epochs
         self.real_ratio = real_ratio
         self.eval_ratio = eval_ratio
         self.m_steps = m_steps
-
-        self.reward = EnsembleMLP(
-            obs_dim + act_dim, 2, ensemble_dim, hidden_dim, num_hidden, activation
-        )
-        self.dynamics = EnsembleMLP(
-            obs_dim + act_dim, obs_dim * 2, ensemble_dim, hidden_dim, num_hidden, activation
-        )
         
-        # set reward and dynamics decay weights
-        self.decay = decay
-        if self.decay is None:
-            self.decay = [0. for l in self.dynamics.layers if hasattr(l, "weight")]
+        self.reward = reward
+        self.dynamics = dynamics
         
         self.optimizers["reward"] = torch.optim.Adam(
             self.reward.parameters(), lr=lr_m
@@ -136,222 +108,49 @@ class MBPO(SAC):
             "eval_eps_return_avg", "eval_eps_len_avg", "critic_loss_avg", 
             "actor_loss_avg", "beta_avg", "rwd_mae_avg", "obs_mae_avg"
         ]
-
-        self.max_model_lv = nn.Parameter(torch.ones(self.obs_dim) / 2, requires_grad=False)
-        self.min_model_lv = nn.Parameter(-torch.ones(self.obs_dim) * 10, requires_grad=False)
-
-        self.obs_mean = nn.Parameter(torch.zeros(self.obs_dim), requires_grad=False)
-        self.obs_variance = nn.Parameter(torch.ones(self.obs_dim), requires_grad=False)
-        self.rwd_mean = nn.Parameter(torch.zeros(1), requires_grad=False)
-        self.rwd_variance = nn.Parameter(torch.ones(1), requires_grad=False)
     
     def update_stats(self):
-        self.obs_mean.data = torch.from_numpy(self.real_buffer.obs_mean).to(torch.float32).to(self.device)
-        self.obs_variance.data = torch.from_numpy(self.real_buffer.obs_variance).to(torch.float32).to(self.device)
-        self.rwd_mean.data = torch.from_numpy(self.real_buffer.rwd_mean).to(torch.float32).to(self.device)
-        self.rwd_variance.data = torch.from_numpy(self.real_buffer.rwd_variance).to(torch.float32).to(self.device)
+        obs_mean = self.real_buffer.obs_mean
+        obs_variance = self.real_buffer.obs_variance
+        rwd_mean = self.real_buffer.rwd_mean
+        rwd_variance = self.real_buffer.rwd_variance
+
+        self.dynamics.update_stats(obs_mean, obs_variance, obs_mean, obs_variance)
+        self.reward.update_stats(obs_mean, obs_variance, rwd_mean, rwd_variance)
     
-    def compute_reward_dist(self, obs, act):
-        obs_act = torch.cat([obs, act], dim=-1)
-        mu_, lv = torch.chunk(self.reward.forward(obs_act), 2, dim=-1)
-        mu = mu_.clip(-self.rwd_clip_max, self.rwd_clip_max)
-
-        if not self.clip_lv:
-            std = torch.exp(lv.clip(np.log(1e-5), np.log(3)))
-        else:
-            lv = self.max_model_lv[0] - F.softplus(self.max_model_lv[0] - lv)
-            lv = self.min_model_lv[0] + F.softplus(lv - self.min_model_lv[0])
-            std = torch.exp(lv)
-        return torch_dist.Normal(mu, std)
-    
-    def compute_reward_log_prob(self, obs, act, rwd):
-        return self.compute_reward_dist(obs, act).log_prob(rwd.unsqueeze(-2))
-    
-    def sample_reward_dist(self, obs, act):
-        rwd_dist = self.compute_reward_dist(obs, act)
-        rwd = rwd_dist.rsample()
-        
-        # randomly select from top models
-        ensemble_idx = torch_dist.Categorical(
-            torch.ones_like(self.topk_dist)
-        ).sample(obs.shape[:-1]).unsqueeze(-1).unsqueeze(-1).to(self.device)
-        rwd = torch.gather(rwd, -2, ensemble_idx).squeeze(-2)
-        return rwd
-
-    def compute_transition_dist(self, obs, act):
-        obs_act = torch.cat([obs, act], dim=-1)
-        mu, lv = torch.chunk(self.dynamics.forward(obs_act), 2, dim=-1)
-
-        if not self.clip_lv:
-            std = torch.exp(lv.clip(np.log(1e-5), np.log(3)))
-        else:
-            lv = self.max_model_lv - F.softplus(self.max_model_lv - lv)
-            lv = self.min_model_lv + F.softplus(lv - self.min_model_lv)
-            std = torch.exp(lv)
-        return torch_dist.Normal(mu, std)
-    
-    def compute_transition_log_prob(self, obs, act, next_obs):
-        return self.compute_transition_dist(obs, act).log_prob(next_obs.unsqueeze(-2))
-    
-    def sample_transition_dist(self, obs, act):
-        next_obs_dist = self.compute_transition_dist(obs, act)
-        next_obs = next_obs_dist.rsample()
-        
-        # randomly select from top models
-        ensemble_idx = torch_dist.Categorical(self.topk_dist).sample(obs.shape[:-1]).unsqueeze(-1)
-        ensemble_idx_ = ensemble_idx.unsqueeze(-1).repeat_interleave(obs.shape[-1], dim=-1).to(self.device) # duplicate alone feature dim
-        next_obs = torch.gather(next_obs, -2, ensemble_idx_).squeeze(-2)
-        return next_obs
-
-    def compute_reward_loss(self, batch):
-        obs = batch["obs"].to(self.device)
-        act = batch["act"].to(self.device)
-        r = batch["rwd"].to(self.device)
-        
-        logp = self.compute_reward_log_prob(obs, act, r).sum(-1)
-        decay_loss = self.compute_decay_loss(self.reward)
-        loss = -logp.mean() + decay_loss
-        return loss
-
-    def compute_dynamics_loss(self, batch):
-        obs = batch["obs"].to(self.device)
-        act = batch["act"].to(self.device)
-        next_obs = batch["next_obs"].to(self.device)
-
-        logp = self.compute_transition_log_prob(obs, act, next_obs).sum(-1)
-        decay_loss = self.compute_decay_loss(self.dynamics)
-        loss = -logp.mean() + decay_loss
-        return loss
-    
-    def compute_decay_loss(self, model):
-        i, loss = 0, 0
-        for layer in model.layers:
-            if hasattr(layer, "weight"):
-                loss += self.decay[i] * torch.sum(layer.weight ** 2) / 2.
-                i += 1
-        return loss
-
-    def eval_reward(self, batch):
-        self.reward.eval()
-
-        obs = batch["obs"].to(self.device)
-        act = batch["act"].to(self.device)
-        rwd = batch["rwd"].to(self.device)
-        
-        with torch.no_grad():
-            rwd_pred = self.compute_reward_dist(obs, act).mean
-        
-        rwd_mae = torch.abs(rwd_pred - rwd.unsqueeze(-2)).mean()
-        
-        stats = {
-            "rwd_mae": rwd_mae.cpu().data.item()
-        }
-        return stats
-
-    def eval_model(self, batch):
-        self.dynamics.eval()
-
-        obs = batch["obs"].to(self.device)
-        act = batch["act"].to(self.device)
-        next_obs = batch["next_obs"].to(self.device)
-
-        with torch.no_grad():
-            next_obs_pred = self.compute_transition_dist(obs, act).mean
-        
-        obs_mae = torch.abs(next_obs_pred - next_obs.unsqueeze(-2)).mean((0, 2))
-        
-        stats = {f"obs_mae_{i}": obs_mae[i].cpu().data.item() for i in range(self.ensemble_dim)}
-        stats["obs_mae"] = obs_mae.mean().cpu().data.item()
-        return stats
-    
-    def take_reward_gradient_step(self, batch):
-        self.reward.train()
-        
-        reward_loss = self.compute_reward_loss(batch)
-        reward_loss.backward()
-        self.optimizers["reward"].step()
-        self.optimizers["reward"].zero_grad()
-        
-        stats = {
-            "rwd_loss": reward_loss.cpu().data.item(),
-        }
-        self.reward.eval()
-        return stats
-
-    def take_model_gradient_step(self, batch):
-        self.dynamics.train()
-        
-        dynamics_loss = self.compute_dynamics_loss(batch)
-        dynamics_loss.backward()
-        self.optimizers["dynamics"].step()
-        self.optimizers["dynamics"].zero_grad()
-        
-        stats = {
-            "obs_loss": dynamics_loss.cpu().data.item(),
-        }
-
-        self.dynamics.eval()
-        return stats
-
-    def train_model_epoch(self, steps, max_epoch_since_update=5, logger=None, verbose=False):
-        # train test split
-        num_eval = int(self.eval_ratio * self.real_buffer.size)
+    def train_dynamics_epoch(
+        self, steps, update_stats, max_epochs_since_update=5, verbose=10, logger=None
+        ):
         data = self.real_buffer.sample(self.real_buffer.size)
-
-        # normalize data
-        data["obs"] = normalize(data["obs"], self.obs_mean.cpu(), self.obs_variance.cpu())
-        data["next_obs"] = normalize(data["next_obs"], self.obs_mean.cpu(), self.obs_variance.cpu())
-        data["rwd"] = normalize(data["rwd"], self.rwd_mean.cpu(), self.rwd_variance.cpu())
-
-        train_data = {k:v[:-num_eval] for k, v in data.items()}
-        eval_data = {k:v[-num_eval:] for k, v in data.items()}
-        
-        best_loss = 1e6
-        epoch_since_last_update = 0
-        stats_epoch = {f"obs_mae_{i}": 1e6 for i in range(self.ensemble_dim)}
-        for e in range(steps):
-            # shuffle train data
-            idx_train = np.arange(len(train_data["obs"]))
-            np.random.shuffle(idx_train)
-
-            train_stats_epoch = []
-            for i in range(0, train_data["obs"].shape[0], self.batch_size):
-                idx_batch = idx_train[i:i+self.batch_size]
-                train_batch = {k:v[idx_batch] for k, v in train_data.items()}
-
-                reward_train_stats = self.take_reward_gradient_step(train_batch)
-                model_train_stats = self.take_model_gradient_step(train_batch)
-
-                train_stats_epoch.append({**reward_train_stats, **model_train_stats})
-            
-            # evaluate
-            reward_eval_stats = self.eval_reward(eval_data)
-            model_eval_stats = self.eval_model(eval_data)
-            
-            # log stats
-            train_stats_epoch = pd.DataFrame(train_stats_epoch).mean(0).to_dict()
-            eval_stats_epoch = {**reward_eval_stats, **model_eval_stats}
-            stats_epoch = {**train_stats_epoch, **eval_stats_epoch}
-            if logger is not None:
-                logger.push(stats_epoch)
-
-            # termination condition based on eval performance
-            current_loss = stats_epoch["rwd_mae"] + stats_epoch["obs_mae"]
-            improvement = (best_loss - current_loss) / best_loss
-            best_loss = min(best_loss, current_loss)
-            if improvement > 0.01:
-                epoch_since_last_update = 0
-            else:
-                epoch_since_last_update += 1
-            
-            if epoch_since_last_update > max_epoch_since_update:
-                break
-
-            if verbose:
-                print("e", e + 1, {k: round(v, 4) for k, v in stats_epoch.items()})
-
-        return stats_epoch
-
+        data = [
+            data["obs"].numpy(),
+            data["act"].numpy(),
+            data["rwd"].numpy(),
+            data["next_obs"].numpy(),
+        ]
+        train_logger = train_ensemble(
+            data, 
+            self, 
+            self.eval_ratio, 
+            self.batch_size, 
+            steps, 
+            grad_clip=self.grad_clip, 
+            update_stats=update_stats,
+            train_reward=True,
+            update_elites=True,
+            max_epoch_since_update=max_epochs_since_update,
+            verbose=verbose, 
+        )
+        stats = {
+            "obs_loss": train_logger.history[-1]["obs_loss_avg"],
+            "rwd_loss": train_logger.history[-1]["rwd_loss_avg"],
+            "obs_mae": train_logger.history[-1]["obs_mae"],
+            "rwd_mae": train_logger.history[-1]["rwd_mae"],
+        }
+        if logger is not None:
+            logger.push(stats)
+        return stats
+    
     def train_policy_epoch(self, rwd_fn=None, logger=None):
         policy_stats_epoch = []
         for _ in range(self.steps):
@@ -378,7 +177,7 @@ class MBPO(SAC):
         Args:
             obs (torch.tensor): observations. size=[batch_size, obs_dim]
             done (torch.tensor): done flag. size=[batch_size, 1]
-            rollout_steps (int): number of rollout steps
+            rollout_steps (int): number of rollout steps.
 
         Returns:
             data (dict): size=[rollout_steps, batch_size, dim]
@@ -392,33 +191,24 @@ class MBPO(SAC):
         for t in range(rollout_steps):
             with torch.no_grad():
                 act = self.choose_action(obs)
+                rwd, _ = self.reward.step(obs, act)
+                next_obs, done = self.dynamics.step(obs, act)
 
-                obs_norm = normalize(obs, self.obs_mean, self.obs_variance)
-                rwd_norm = self.sample_reward_dist(obs_norm, act)
-                next_obs_norm = self.sample_transition_dist(obs_norm, act)
-
-                rwd = denormalize(rwd_norm, self.rwd_mean, self.rwd_variance)
-                next_obs = denormalize(next_obs_norm, self.obs_mean, self.obs_variance)
-
-            if self.termination_fn is not None:
-                done = self.termination_fn(
-                    obs.cpu().numpy(), act.cpu().numpy(), next_obs.cpu().numpy()
-                )
-                done = torch.from_numpy(done).view(-1, 1).to(torch.float32)
-            
             data["obs"].append(obs)
             data["act"].append(act)
             data["next_obs"].append(next_obs)
             data["rwd"].append(rwd)
             data["done"].append(done)
             
-            obs = next_obs.clone()
-
-        data["obs"] = torch.stack(data["obs"])
-        data["act"] = torch.stack(data["act"])
-        data["next_obs"] = torch.stack(data["next_obs"])
-        data["rwd"] = torch.stack(data["rwd"])
-        data["done"] = torch.stack(data["done"])
+            obs = next_obs[done.flatten() == 0].clone()            
+            if len(obs) == 0:
+                break
+        
+        data["obs"] = torch.cat(data["obs"], dim=0)
+        data["act"] = torch.cat(data["act"], dim=0)
+        data["next_obs"] = torch.cat(data["next_obs"], dim=0)
+        data["rwd"] = torch.cat(data["rwd"], dim=0)
+        data["done"] = torch.cat(data["done"], dim=0)
         return data
     
     def sample_imagined_data(self, batch_size, rollout_steps, mix=True):
@@ -443,7 +233,6 @@ class MBPO(SAC):
         rollout_data = self.rollout_dynamics(
             batch["obs"].to(self.device), batch["done"].to(self.device), rollout_steps
         )
-        rollout_data = {k: v.flatten(0, 1) for k, v in rollout_data.items()}
         self.replay_buffer.push_batch(
             rollout_data["obs"].cpu().numpy(),
             rollout_data["act"].cpu().numpy(),
@@ -461,14 +250,6 @@ class MBPO(SAC):
             )
         )
         return int(rollout_steps)
-
-    def compute_topk_dist(self, stats):
-        """ Compute top k model selection distribution """
-        maes = [v for k, v in stats.items() if "obs_mae_" in k]
-        idx_topk = np.argsort(maes)[:self.topk]
-        topk_dist = np.zeros(self.ensemble_dim)
-        topk_dist[idx_topk] = 1./self.topk
-        self.topk_dist = torch.from_numpy(topk_dist).to(torch.float32)
 
     def train_policy(
         self, env, eval_env, max_steps, epochs, steps_per_epoch, update_after, 
@@ -512,17 +293,18 @@ class MBPO(SAC):
 
             # train model
             if (t + 1) >= update_after and (t - update_after + 1) % update_model_every == 0:
-                if self.norm_obs:
-                    self.update_stats()
-                model_stats_epoch = self.train_model_epoch(self.m_steps, logger=logger)
-                self.compute_topk_dist(model_stats_epoch)
-                print("top k dist", self.topk_dist.numpy())
+                model_stats_epoch = self.train_dynamics_epoch(
+                    self.m_steps, 
+                    update_stats=self.norm_obs,
+                    max_epochs_since_update=5, 
+                    verbose=self.m_steps + 1, 
+                    logger=logger
+                )
                 if verbose:
                     round_loss_dict = {k: round(v, 3) for k, v in model_stats_epoch.items()}
                     print(f"e: {epoch + 1}, t model: {t + 1}, {round_loss_dict}")
                 
                 # generate imagined data
-                # self.replay_buffer.clear()
                 rollout_steps = self.compute_rollout_steps(epoch + 1)
                 self.replay_buffer.max_size = min(
                     self.buffer_size, int(self.model_retain_epochs * self.rollout_batch_size * rollout_steps)
@@ -530,7 +312,9 @@ class MBPO(SAC):
                 self.sample_imagined_data(
                     self.rollout_batch_size, rollout_steps, mix=False
                 )
-                print("epoch", epoch + 1, "real buffer size", self.real_buffer.size, "fake buffer size", self.replay_buffer.size, "rollout steps", rollout_steps)
+                print("rollout_steps: {}, real buffer size: {}, fake buffer size: {}".format(
+                    rollout_steps, self.real_buffer.size, self.replay_buffer.size
+                ))
 
             # train policy
             if (t + 1) > update_after and (t - update_after + 1) % update_policy_every == 0:
@@ -557,7 +341,7 @@ class MBPO(SAC):
                 print()
 
                 if t > update_after and callback is not None:
-                    callback(self, logger)
+                    callback(self, pd.DataFrame(logger.history))
         
         env.close()
         return logger

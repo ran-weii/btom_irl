@@ -372,19 +372,21 @@ class Logger():
                 self.epoch_dict[key] = []
             self.epoch_dict[key].append(val)
 
-    def log(self):
+    def log(self, min_max=False, silent=False):
         stats = dict()
         for key, val in self.epoch_dict.items():
             if isinstance(val[0], np.ndarray) or len(val) > 1:
                 vals = np.stack(val)
                 stats[key + "_avg"] = np.mean(vals)
                 stats[key + "_std"] = np.std(vals)
-                stats[key + "_min"] = np.min(vals)
-                stats[key + "_max"] = np.max(vals)
+                if min_max:
+                    stats[key + "_min"] = np.min(vals)
+                    stats[key + "_max"] = np.max(vals)
             else:
                 stats[key] = val[-1]
-
-        pprint.pprint({k: np.round(v, 4) for k, v, in stats.items()})
+        
+        if not silent:
+            pprint.pprint({k: np.round(v, 4) for k, v, in stats.items()})
         self.history.append(stats)
 
         # erase epoch stats
