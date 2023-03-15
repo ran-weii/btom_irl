@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from src.agents.utils import value_iteration
+from src.tabular.planning import value_iteration
 
 class DiscreteAgent(nn.Module):
     def __init__(self, state_dim, act_dim, gamma, alpha, horizon):

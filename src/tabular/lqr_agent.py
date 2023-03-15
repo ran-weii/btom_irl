@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.distributions as torch_dist
-from src.agents.utils import riccati_equation
+from src.tabular.planning import riccati_equation
 
 class LQRAgent(nn.Module):
     """ Linear quadratic control agent """
