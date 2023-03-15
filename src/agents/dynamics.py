@@ -181,9 +181,9 @@ class EnsembleDynamics(nn.Module):
             done = self.termination_fn(
                 obs.data.cpu().numpy(), act.data.cpu().numpy(), out.data.cpu().numpy()
             )
-            done = torch.from_numpy(done).unsqueeze(-1).to(torch.float32)
+            done = torch.from_numpy(done).unsqueeze(-1).to(torch.float32).to(self.device)
         else:
-            done = torch.zeros(list(obs.shape)[:-1] + [1]).to(torch.float32)
+            done = torch.zeros(list(obs.shape)[:-1] + [1]).to(torch.float32).to(self.device)
         return out, done
     
     def compute_loss(self, obs, act, target):

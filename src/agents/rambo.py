@@ -24,7 +24,8 @@ class RAMBO(MBPO):
         beta=0.2, 
         polyak=0.995, 
         tune_beta=True,
-        adv_penalty=10., 
+        obs_penalty=1., 
+        adv_penalty=3e-4, 
         norm_advantage=False,
         update_critic_adv=False,
         buffer_size=1e6, 
@@ -59,6 +60,7 @@ class RAMBO(MBPO):
             beta (float, optional): softmax temperature. Default=0.2
             polyak (float, optional): target network polyak averaging factor. Default=0.995
             tune_beta (bool, optional): whether to automatically tune temperature. Default=True
+            obs_penalty (float, optional): transition likelihood penalty. Default=1..
             adv_penalty (float, optional): model advantage penalty. Default=3e-4.
             norm_advantage (bool, optional): whether to normalize advantage. Default=False
             update_adv_critic (bool, optional): whether to udpate critic during model update. Default=False
@@ -87,6 +89,7 @@ class RAMBO(MBPO):
             rollout_min_epoch, rollout_max_epoch, model_retain_epochs,
             real_ratio, eval_ratio, m_steps, a_steps, lr_a, lr_c, lr_m, grad_clip, device
         )
+        self.obs_penalty = obs_penalty
         self.adv_penalty = adv_penalty
         self.norm_advantage = norm_advantage
         self.update_critic_adv = update_critic_adv
@@ -153,7 +156,7 @@ class RAMBO(MBPO):
         adv_loss, adv_q_loss, next_obs, adv_stats = self.compute_dynamics_adversarial_loss(obs, act)
         reward_loss = self.reward.compute_loss(sl_batch["obs"], sl_batch["act"], sl_batch["rwd"])
         dynamics_loss = self.dynamics.compute_loss(sl_batch["obs"], sl_batch["act"], sl_batch["next_obs"])
-        total_loss = reward_loss + dynamics_loss + self.adv_penalty * adv_loss
+        total_loss = self.obs_penalty * (reward_loss + dynamics_loss) + self.adv_penalty * adv_loss
         total_loss.backward()
         if self.update_critic_adv:
             (self.adv_penalty * adv_q_loss).backward()
@@ -258,7 +261,7 @@ class RAMBO(MBPO):
         return stats_epoch
     
     def train_policy(
-        self, eval_env, max_steps, epochs, steps_per_epoch, sample_model_every, 
+        self, eval_env, max_steps, epochs, steps_per_epoch, sample_model_every, update_model_every,
         rwd_fn=None, num_eval_eps=0, eval_deterministic=True, callback=None, verbose=10
         ):
         logger = Logger()
@@ -267,6 +270,13 @@ class RAMBO(MBPO):
         
         epoch = 0
         for t in range(total_steps):
+            # train model adversary
+            if (t + 1) % update_model_every == 0:
+                model_stats_epoch = self.train_adversarial_model_epoch(self.m_steps, rollout_steps, logger=logger)
+                if verbose:
+                    round_loss_dict = {k: round(v, 3) for k, v in model_stats_epoch.items()}
+                    print(f"e: {epoch + 1}, t model: {t + 1}, {round_loss_dict}")
+
             # train model
             if t == 0 or (t + 1) % sample_model_every == 0:
                 # generate imagined data
@@ -288,13 +298,6 @@ class RAMBO(MBPO):
             if (t + 1) % verbose == 0:
                 round_loss_dict = {k: round(v, 3) for k, v in policy_stats_epoch.items()}
                 print(f"e: {epoch + 1}, t policy: {t + 1}, {round_loss_dict}")
-
-            # train model adversary
-            if (t + 1) % steps_per_epoch == 0:
-                model_stats_epoch = self.train_adversarial_model_epoch(self.m_steps, rollout_steps, logger=logger)
-                if verbose:
-                    round_loss_dict = {k: round(v, 3) for k, v in model_stats_epoch.items()}
-                    print(f"e: {epoch + 1}, t model: {t + 1}, {round_loss_dict}")
 
             # end of epoch handeling
             if (t + 1) % steps_per_epoch == 0: 

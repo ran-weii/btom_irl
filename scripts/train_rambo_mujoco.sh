@@ -18,6 +18,7 @@ python train_rambo_mujoco.py \
 --clip_lv True \
 --residual False \
 --rwd_clip_max 10. \
+--obs_penalty 1. \
 --adv_penalty 3e-4 \
 --norm_advantage True \
 --update_critic_adv False \
@@ -40,15 +41,16 @@ python train_rambo_mujoco.py \
 --grad_clip 100. \
 --env_name "Hopper-v4" \
 --pretrain_steps 0 \
---epochs 200 \
+--epochs 1000 \
 --max_steps 1000 \
 --steps_per_epoch 1000 \
 --sample_model_every 250 \
+--update_model_every 1000 \
 --update_policy_every 1 \
---cp_every 1 \
+--cp_every 10 \
 --num_eval_eps 5 \
 --eval_deterministic True \
 --verbose 50 \
 --render False \
---save True \
+--save False \
 --seed 0
