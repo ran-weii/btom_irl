@@ -159,17 +159,17 @@ class DiscreteBTOM(nn.Module):
                 a_fake = self.agent.choose_action(s)
                 
                 if self.exact:
-                    real_traj = self.compute_state_action_marginal(s, pi_data, pi, transition, self.rollout_steps)
-                    fake_traj = self.compute_state_action_marginal(s, pi_fake, pi, transition, self.rollout_steps)
+                    real_traj = self.compute_state_action_marginal(s, pi_data, pi, transition.data, self.rollout_steps)
+                    fake_traj = self.compute_state_action_marginal(s, pi_fake, pi, transition.data, self.rollout_steps)
                 else:
-                    real_traj = self.rollout(s, a, pi, transition, self.rollout_steps)
-                    fake_traj = self.rollout(s, a_fake, pi, transition, self.rollout_steps)
+                    real_traj = self.rollout(s, a, pi, transition.data, self.rollout_steps)
+                    fake_traj = self.rollout(s, a_fake, pi, transition.data, self.rollout_steps)
             
             if self.exact:
-                r_cum_real = self.compute_reward_cumulents_from_marginal(real_traj, r)
-                r_cum_fake = self.compute_reward_cumulents_from_marginal(fake_traj, r)
-                ev_cum_real = self.compute_value_cumulents_from_marginal(real_traj, transition, v.data)
-                ev_cum_fake = self.compute_value_cumulents_from_marginal(fake_traj, transition, v.data)
+                r_cum_real = self.compute_reward_cumulents_from_marginal(real_traj.data, r)
+                r_cum_fake = self.compute_reward_cumulents_from_marginal(fake_traj.data, r)
+                ev_cum_real = self.compute_value_cumulents_from_marginal(real_traj.data, transition, v.data)
+                ev_cum_fake = self.compute_value_cumulents_from_marginal(fake_traj.data, transition, v.data)
             else:
                 r_cum_real = self.compute_reward_cumulents_from_rollout(real_traj, r)
                 r_cum_fake = self.compute_reward_cumulents_from_rollout(fake_traj, r)
