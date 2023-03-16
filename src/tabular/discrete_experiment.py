@@ -1,4 +1,7 @@
 import numpy as np
+import torch
+from src.env.gridworld import Gridworld
+from src.tabular.discrete_agent import DiscreteAgent
 
 def create_experiment(num_grids, init_type, goal_type, p_goal=0.5):
     """ Create initial and goal distribution specifications for gridworld 
@@ -36,10 +39,38 @@ def create_experiment(num_grids, init_type, goal_type, p_goal=0.5):
         raise ValueError("init_type not supported, choose from ['one_goal', 'three_goals']")
     return init_specs, goal_specs
 
+def get_true_parameters(num_grids, init_type, goal_type, p_goal, epsilon):
+    """ Get true parameters from environment """
+    init_specs, goal_specs = create_experiment(num_grids, init_type, goal_type, p_goal)
+    env = Gridworld(num_grids, init_specs, goal_specs, epsilon)
+
+    transition = env.transition_matrix.copy()
+    target = env.target_dist.copy()
+    return transition, target
+
+def load_ground_truth_agent(
+    num_grids, init_type, goal_type, p_goal, epsilon=0., gamma=0.9, alpha=1., horizon=0
+    ):
+    init_specs, goal_specs = create_experiment(
+        num_grids, init_type, goal_type, p_goal=p_goal
+    )
+
+    env = Gridworld(
+        num_grids, init_specs, goal_specs, epsilon
+    )
+    
+    transition = torch.from_numpy(env.transition_matrix).to(torch.float32)
+    target = torch.from_numpy(env.target_dist).to(torch.float32)
+    log_transition = torch.log(transition + 1e-6)
+    log_target = torch.log(target + 1e-6)
+
+    agent = DiscreteAgent(env.state_dim, env.act_dim, gamma, alpha, horizon)
+    agent.log_transition.data = log_transition
+    agent.log_target.data = log_target
+    agent.plan()
+    return agent
 
 if __name__ == "__main__":
-    from src.env.gridworld import Gridworld
-
     def test_create_experiment():
         num_grids = 5
 

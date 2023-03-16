@@ -7,8 +7,11 @@ import pickle
 import numpy as np
 import torch
 
-from src.agents.discrete_agent import DiscreteAgent
-from src.algo.discrete_btom import DiscreteBTOM
+from src.env.gridworld import Gridworld
+from src.tabular.discrete_agent import DiscreteAgent
+from src.tabular.discrete_btom import DiscreteBTOM
+from src.tabular.discrete_experiment import get_true_parameters
+from src.tabular.utils import compute_mle_transition
 
 def parse_args():
     bool_ = lambda x: x if isinstance(x, bool) else x == "True"
@@ -16,14 +19,23 @@ def parse_args():
     parser = argparse.ArgumentParser()
     # data args
     parser.add_argument("--data_path", type=str, default="../data/gridworld")
+    parser.add_argument("--init_type", type=str, choices=["one_state", "uniform"], default="uniform")
+    parser.add_argument("--goal_type", type=str, choices=["one_goal", "three_goals"], default="three_goals")
+    parser.add_argument("--p_goal", type=float, default=0.95, 
+        help="goal probability of upper right corner, only used if goal_type is three_goals, default=0.95")
+    parser.add_argument("--epsilon", type=float, default=0., help="transition error probability, default=0.1")
+    parser.add_argument("--num_traj", type=int, default=100)
     # env args
     parser.add_argument("--num_grids", type=int, default=5, help="number of grids, default=5")
     # agent args
-    parser.add_argument("--gamma", type=float, default=0.7, help="discount factor, default=0.7")
+    parser.add_argument("--gamma", type=float, default=0.9, help="discount factor, default=0.9")
     parser.add_argument("--alpha", type=float, default=1., help="softmax temperature, default=1.")
     parser.add_argument("--horizon", type=int, default=0, help="planning horizon, 0 for infinite horizon, default=0")
     # algo args
     parser.add_argument("--algo", type=str, choices=["btom"], default="btom")
+    parser.add_argument("--fit_transition", type=bool_, default=True)
+    parser.add_argument("--fit_reward", type=bool_, default=True)
+    parser.add_argument("--mle_transition", type=bool_, default=True, help="init with mle transition if fit_transition")
     parser.add_argument("--rollout_steps", type=int, default=30, help="number of rollout steps, default=30")
     parser.add_argument("--exact", type=bool_, default=True, help="whether to perform exact computation, default=True")
     parser.add_argument("--obs_penalty", type=float, default=1., help="transition likelihood penalty, default=1.")
@@ -38,30 +50,6 @@ def parse_args():
     arglist = vars(parser.parse_args())
     return arglist
 
-def get_mle_init_dist(data, state_dim):
-    s0, counts = np.unique(data["s"][:, 0], return_counts=True)
-    init_dist = np.zeros((state_dim,))
-    init_dist[s0] += counts
-    init_dist /= init_dist.sum()
-    return init_dist
-
-def get_mle_transition(data, state_dim, act_dim):
-    s = data["s"][:, :-1].flatten()
-    a = data["a"].flatten()
-    s_next = data["s"][:, 1:].flatten()
-
-    transition = np.zeros((act_dim, state_dim, state_dim)) + 1e-6
-    for i in range(act_dim):
-        for j in range(state_dim):
-            idx = np.stack([a == i, s == j]).all(0)
-            s_next_a = s_next[idx]
-            if len(s_next_a) > 0:
-                s_next_unique, count = np.unique(s_next_a, return_counts=True)
-                transition[i, j, s_next_unique] += count
-
-    transition = transition / transition.sum(-1, keepdims=True)
-    return transition
-
 def main(arglist):
     np.random.seed(arglist["seed"])
     torch.manual_seed(arglist["seed"])
@@ -70,13 +58,21 @@ def main(arglist):
     
     # load data
     data_path = arglist["data_path"]
-    with open(os.path.join(data_path, "data.p"), "rb") as f:
-        data = pickle.load(f)
+    with open(os.path.join(data_path, "data_{}_{}.p".format(arglist["init_type"], arglist["goal_type"])), "rb") as f:
+        data = pickle.load(f) 
+    data = {k: v[:arglist["num_traj"]] for k, v in data.items()}
     
-    # init estimates
+    # get true params
+    true_transition, true_target = get_true_parameters(
+        arglist["num_grids"], arglist["init_type"], arglist["goal_type"], arglist["p_goal"], arglist["epsilon"]
+    )
+    true_transition = torch.from_numpy(true_transition).to(torch.float32)
+    true_target = torch.from_numpy(true_target).to(torch.float32)
+    
+    # get empirical params
     state_dim = int(arglist["num_grids"] ** 2)
     act_dim = 5
-    transition = get_mle_transition(data, state_dim, act_dim)
+    mle_transition = compute_mle_transition(data, state_dim, act_dim)
 
     # init agent
     gamma = arglist["gamma"]
@@ -93,22 +89,30 @@ def main(arglist):
         lr=arglist["lr"], 
         decay=arglist["decay"]
     )
+    
+    if not arglist["fit_transition"]:
+        if arglist["mle_transition"]:
+            model.agent.log_transition.data = torch.log(mle_transition + 1e-6)
+        else:
+            model.agent.log_transition.data = torch.log(true_transition + 1e-6)
+            model.agent.log_transition.requires_grad = False
+    if not arglist["fit_reward"]:
+        model.agent.log_target.data = torch.log(true_target + 1e-6)
+        model.agent.log_target.requires_grad = False
+    
     history = model.fit(data, arglist["epochs"])
 
     # save model
     if arglist["save"]:
-        exp_path = arglist["exp_path"]
-        env_path = os.path.join(exp_path, "gridworld")
-        algo_path = os.path.join(env_path, arglist["algo"])
-        save_path = os.path.join(algo_path, date_time)
-        if not os.path.exists(exp_path):
-            os.mkdir(exp_path)
-        if not os.path.exists(env_path):
-            os.mkdir(env_path)
-        if not os.path.exists(algo_path):
-            os.mkdir(algo_path)
+        save_path = os.path.join(
+            arglist["exp_path"],
+            "gridworld",
+            arglist["algo"], 
+            "{}_{}".format(arglist["init_type"], arglist["goal_type"]), 
+            date_time
+        )
         if not os.path.exists(save_path):
-            os.mkdir(save_path)
+            os.makedirs(save_path)
     
         # save args
         with open(os.path.join(save_path, "args.json"), "w") as f:

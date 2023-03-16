@@ -34,6 +34,17 @@ class GridworldVis:
         ax.plot(sample_path[:, -1, 0], sample_path[:, -1, 1], "go", label="End")
         ax.legend()
         return ax
+    
+    def plot_state_action(self, p, ax, fmt=".2f", annot=True, cbar=False, vmin=None, vmax=None):
+        sns.heatmap(p, fmt=fmt, vmin=vmin, vmax=vmax, annot=annot, cbar=cbar, ax=ax)
+        s_labels = self.env.state2pos
+        ax.set_xticklabels(self.env.a_labels)
+        ax.set_yticklabels(
+            [tuple(s_labels[int(l - 0.5)]) for l in ax.get_yticks()],
+            rotation=0
+        )
+        ax.invert_yaxis()
+        return ax
 
 if __name__ == "__main__":
     import os
