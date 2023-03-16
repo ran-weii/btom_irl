@@ -30,10 +30,13 @@ class DiscreteAgent(nn.Module):
         """ Compute log target distribution """
         return torch.log_softmax(self.log_target, dim=-1)
 
-    def plan(self):
+    def plan(self, bonus=None):
         with torch.no_grad():
             transition = self.transition()
-            reward = self.reward().view(-1, 1).repeat_interleave(self.act_dim, -1)
+            reward = self.reward()
+            if bonus is not None:
+                reward += bonus
+            reward = reward.view(-1, 1).repeat_interleave(self.act_dim, -1)
         
         if self.finite_horizon:
             q, _ = value_iteration(

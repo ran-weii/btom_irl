@@ -51,7 +51,16 @@ def kl_divergence(p, q, eps=1e-6):
         kl = kl.data.numpy()
     return kl
 
-def compute_state_action_density(data, state_dim, act_dim):
+def compute_state_marginal(data, state_dim):
+    s = data["s"][:, :-1].flatten()
+    s_unique, counts = np.unique(s, return_counts=True)
+
+    p = np.zeros((state_dim,))
+    p[s_unique] = counts
+    p = p / p.sum()
+    return p
+
+def compute_state_action_marginal(data, state_dim, act_dim):
     s = data["s"][:, :-1].flatten()
     a = data["a"].flatten()
 

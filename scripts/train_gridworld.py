@@ -7,11 +7,11 @@ import pickle
 import numpy as np
 import torch
 
-from src.env.gridworld import Gridworld
 from src.tabular.discrete_agent import DiscreteAgent
 from src.tabular.discrete_btom import DiscreteBTOM
+from src.tabular.discrete_mceirl import DiscreteMCEIRL
 from src.tabular.discrete_experiment import get_true_parameters
-from src.tabular.utils import compute_mle_transition
+from src.tabular.utils import compute_mle_transition, compute_state_marginal
 
 def parse_args():
     bool_ = lambda x: x if isinstance(x, bool) else x == "True"
@@ -32,10 +32,11 @@ def parse_args():
     parser.add_argument("--alpha", type=float, default=1., help="softmax temperature, default=1.")
     parser.add_argument("--horizon", type=int, default=0, help="planning horizon, 0 for infinite horizon, default=0")
     # algo args
-    parser.add_argument("--algo", type=str, choices=["btom"], default="btom")
+    parser.add_argument("--algo", type=str, choices=["btom", "irl", "pil"], default="btom")
     parser.add_argument("--fit_transition", type=bool_, default=True)
     parser.add_argument("--fit_reward", type=bool_, default=True)
     parser.add_argument("--mle_transition", type=bool_, default=True, help="init with mle transition if fit_transition")
+    parser.add_argument("--pess_penalty", type=float, default=0., help="pessimistic penalty, default=0.")
     parser.add_argument("--rollout_steps", type=int, default=30, help="number of rollout steps, default=30")
     parser.add_argument("--exact", type=bool_, default=True, help="whether to perform exact computation, default=True")
     parser.add_argument("--obs_penalty", type=float, default=1., help="transition likelihood penalty, default=1.")
@@ -73,6 +74,9 @@ def main(arglist):
     state_dim = int(arglist["num_grids"] ** 2)
     act_dim = 5
     mle_transition = compute_mle_transition(data, state_dim, act_dim)
+    mle_transition = torch.from_numpy(mle_transition).to(torch.float32)
+    state_marginal = compute_state_marginal(data, state_dim)
+    state_marginal = torch.from_numpy(state_marginal).to(torch.float32)
 
     # init agent
     gamma = arglist["gamma"]
@@ -81,24 +85,42 @@ def main(arglist):
     agent = DiscreteAgent(state_dim, act_dim, gamma, alpha, horizon)
     
     # init model
-    model = DiscreteBTOM(
-        agent, 
-        arglist["rollout_steps"],
-        exact=arglist["exact"],
-        obs_penalty=arglist["obs_penalty"], 
-        lr=arglist["lr"], 
-        decay=arglist["decay"]
-    )
+    if arglist["algo"] == "btom":
+        model = DiscreteBTOM(
+            agent, 
+            arglist["rollout_steps"],
+            exact=arglist["exact"],
+            obs_penalty=arglist["obs_penalty"], 
+            lr=arglist["lr"], 
+            decay=arglist["decay"]
+        )
+    elif arglist["algo"] in ["irl", "pil"]:
+        arglist["fit_transition"] = False
+        arglist["fit_reward"] = True
+        arglist["pess_penalty"] = 0 if arglist["algo"] == "irl" else arglist["pess_penalty"]
+        model = DiscreteMCEIRL(
+            agent, 
+            state_marginal,
+            arglist["rollout_steps"],
+            pess_penalty=arglist["pess_penalty"],
+            exact=arglist["exact"],
+            lr=arglist["lr"], 
+            decay=arglist["decay"]
+        )
     
+    # load parameters
     if not arglist["fit_transition"]:
         if arglist["mle_transition"]:
             model.agent.log_transition.data = torch.log(mle_transition + 1e-6)
+            print("loaded mle transition")
         else:
             model.agent.log_transition.data = torch.log(true_transition + 1e-6)
             model.agent.log_transition.requires_grad = False
+            print("loaded true transition")
     if not arglist["fit_reward"]:
         model.agent.log_target.data = torch.log(true_target + 1e-6)
         model.agent.log_target.requires_grad = False
+        print("loaded true reward")
     
     history = model.fit(data, arglist["epochs"])
 
