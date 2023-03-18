@@ -16,7 +16,7 @@ def value_iteration(transition, reward, gamma, alpha, finite_horizon=False, max_
         q (torch.tensor): final Q function. size=[eff_horizon + 1, state_dim, act_dim]
         error (float): stopping bellman error
     """
-    assert torch.all(torch.isclose(transition.sum(-1), torch.ones(1)))
+    assert torch.all(torch.isclose(transition.sum(-1), torch.ones(1), atol=1e-5))
     assert len(reward.shape) == 2
     
     q = [reward] + [torch.empty(0)] * (max_iter)

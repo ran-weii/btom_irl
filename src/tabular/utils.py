@@ -1,7 +1,29 @@
 import numpy as np
 import torch
 
-def rollout_parallel(env, agent, max_steps):
+def rollout(env, agent, max_steps, truncate=False):
+    s = env.reset()
+    data = {"s": [s], "a": [], "r": []}
+    for t in range(max_steps):
+        with torch.no_grad():
+            a = agent.choose_action(
+                torch.from_numpy(np.array([s])).to(torch.float32)
+            ).numpy()[0]
+        s, r, done, info = env.step(a)
+        
+        if truncate and done:
+            break
+
+        data["s"].append(s)
+        data["a"].append(a)
+        data["r"].append(r)
+
+    data["s"] = np.stack(data["s"])
+    data["a"] = np.stack(data["a"])
+    data["r"] = np.stack(data["r"])
+    return data
+
+def rollout_parallel(env, agent, max_steps, truncate=False):
     s = env.reset()
     data = {"s": [s], "a": [], "r": []}
     for t in range(max_steps):
@@ -11,7 +33,7 @@ def rollout_parallel(env, agent, max_steps):
             ).numpy()
         s, r, done, info = env.step(a)
         
-        if any(done) or (t > max_steps):
+        if truncate and all(done):
             break
 
         data["s"].append(s)
