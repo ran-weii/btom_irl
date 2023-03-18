@@ -7,7 +7,7 @@ import torch
 
 from src.env.gridworld import Gridworld
 from src.tabular.discrete_agent import DiscreteAgent
-from src.tabular.discrete_experiment import create_experiment
+from src.tabular.gridworld_experiment import create_experiment
 from src.tabular.utils import rollout_parallel
 
 def parse_args():
@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument("--num_workers", type=int, default=2, help="number of rollout workers, defualt=2")
     parser.add_argument("--seed", type=int, default=0)
     # save args
-    parser.add_argument("--save_path", type=str, default="../data")
+    parser.add_argument("--save_path", type=str, default="../../data")
     parser.add_argument("--save", type=bool_, default=True)
     
     arglist = vars(parser.parse_args())

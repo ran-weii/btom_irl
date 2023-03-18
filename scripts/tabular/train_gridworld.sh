@@ -1,5 +1,9 @@
 #! /bin/bash
-num_traj=300
+num_traj=100
+gamma=0.7
+rollout_steps=50
+obs_penalty=10.
+epochs=1000
 exact=True
 save=True
 
@@ -33,7 +37,7 @@ python train_gridworld.py \
 --p_goal 0.95 \
 --epsilon 0. \
 --num_traj $num_traj \
---gamma 0.9 \
+--gamma $gamma \
 --alpha 1. \
 --horizon 0 \
 --algo $algo \
@@ -41,12 +45,12 @@ python train_gridworld.py \
 --fit_reward $fit_reward \
 --mle_transition $mle_transition \
 --pess_penalty $pess_penalty \
---rollout_steps 100 \
+--rollout_steps $rollout_steps \
 --exact $exact \
---obs_penalty 10. \
+--obs_penalty $obs_penalty \
 --lr $lr \
 --decay 0. \
---epochs 1000 \
+--epochs $epochs \
 --save $save
 
 python train_gridworld.py \
@@ -55,7 +59,7 @@ python train_gridworld.py \
 --p_goal 0.95 \
 --epsilon 0. \
 --num_traj $num_traj \
---gamma 0.9 \
+--gamma $gamma \
 --alpha 1. \
 --horizon 0 \
 --algo $algo \
@@ -63,12 +67,12 @@ python train_gridworld.py \
 --fit_reward $fit_reward \
 --mle_transition $mle_transition \
 --pess_penalty $pess_penalty \
---rollout_steps 100 \
+--rollout_steps $rollout_steps \
 --exact $exact \
---obs_penalty 10. \
+--obs_penalty $obs_penalty \
 --lr $lr \
 --decay 0. \
---epochs 1000 \
+--epochs $epochs \
 --save $save
 
 python train_gridworld.py \
@@ -77,7 +81,7 @@ python train_gridworld.py \
 --p_goal 0.95 \
 --epsilon 0. \
 --num_traj $num_traj \
---gamma 0.9 \
+--gamma $gamma \
 --alpha 1. \
 --horizon 0 \
 --algo $algo \
@@ -85,10 +89,10 @@ python train_gridworld.py \
 --fit_reward $fit_reward \
 --mle_transition $mle_transition \
 --pess_penalty $pess_penalty \
---rollout_steps 100 \
+--rollout_steps $rollout_steps \
 --exact $exact \
---obs_penalty 10. \
+--obs_penalty $obs_penalty \
 --lr $lr \
 --decay 0. \
---epochs 1000 \
+--epochs $epochs \
 --save $save

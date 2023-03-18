@@ -10,7 +10,7 @@ import torch
 from src.tabular.discrete_agent import DiscreteAgent
 from src.tabular.discrete_btom import DiscreteBTOM
 from src.tabular.discrete_mceirl import DiscreteMCEIRL
-from src.tabular.discrete_experiment import get_true_parameters
+from src.tabular.gridworld_experiment import get_true_parameters
 from src.tabular.utils import compute_mle_transition, compute_state_marginal
 
 def parse_args():
@@ -18,7 +18,7 @@ def parse_args():
 
     parser = argparse.ArgumentParser()
     # data args
-    parser.add_argument("--data_path", type=str, default="../data/gridworld")
+    parser.add_argument("--data_path", type=str, default="../../data/gridworld")
     parser.add_argument("--init_type", type=str, choices=["one_state", "uniform"], default="uniform")
     parser.add_argument("--goal_type", type=str, choices=["one_goal", "three_goals"], default="three_goals")
     parser.add_argument("--p_goal", type=float, default=0.95, 
@@ -45,7 +45,7 @@ def parse_args():
     parser.add_argument("--epochs", type=int, default=10, help="training epochs, default=10")
     parser.add_argument("--seed", type=int, default=0)
     # save args
-    parser.add_argument("--exp_path", type=str, default="../exp")
+    parser.add_argument("--exp_path", type=str, default="../../exp")
     parser.add_argument("--save", type=bool_, default=True)
 
     arglist = vars(parser.parse_args())
@@ -115,8 +115,8 @@ def main(arglist):
             print("loaded mle transition")
         else:
             model.agent.log_transition.data = torch.log(true_transition + 1e-6)
-            model.agent.log_transition.requires_grad = False
             print("loaded true transition")
+        model.agent.log_transition.requires_grad = False
     if not arglist["fit_reward"]:
         model.agent.log_target.data = torch.log(true_target + 1e-6)
         model.agent.log_target.requires_grad = False
