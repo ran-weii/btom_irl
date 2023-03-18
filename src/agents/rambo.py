@@ -95,7 +95,7 @@ class RAMBO(MBPO):
         self.update_critic_adv = update_critic_adv
         self.plot_keys = [
             "eval_eps_return_avg", "eval_eps_len_avg", "critic_loss_avg", 
-            "actor_loss_avg", "beta_avg", "adv_loss_avg", "obs_mae", 
+            "actor_loss_avg", "beta_avg", "adv_loss_avg", "obs_mae_avg", 
         ]
     
     def compute_dynamics_adversarial_loss(self, obs, act):
@@ -159,7 +159,7 @@ class RAMBO(MBPO):
         total_loss = self.obs_penalty * (reward_loss + dynamics_loss) + self.adv_penalty * adv_loss
         total_loss.backward()
         if self.update_critic_adv:
-            (self.adv_penalty * adv_q_loss).backward()
+            adv_q_loss.backward()
         
         # if self.grad_clip is not None:
         #     nn.utils.clip_grad_norm_(self.parameters(), self.grad_clip)
@@ -178,8 +178,8 @@ class RAMBO(MBPO):
                 for p, p_target in zip(
                     self.critic.parameters(), self.critic_target.parameters()
                 ):
-                    p_target.data.mul_(self.polyak * self.adv_penalty)
-                    p_target.data.add_((1 - self.polyak * self.adv_penalty) * p.data)
+                    p_target.data.mul_(self.polyak)
+                    p_target.data.add_((1 - self.polyak) * p.data)
 
         stats = {
             "rwd_loss": reward_loss.cpu().data.item(),

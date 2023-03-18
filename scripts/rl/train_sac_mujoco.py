@@ -15,7 +15,7 @@ def parse_args():
     
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--exp_path", type=str, default="../exp/sac")
+    parser.add_argument("--exp_path", type=str, default="../../exp/sac")
     parser.add_argument("--cp_path", type=str, default="none", help="checkpoint path, default=none")
     # algo args
     parser.add_argument("--hidden_dim", type=int, default=128, help="neural network hidden dims, default=64")

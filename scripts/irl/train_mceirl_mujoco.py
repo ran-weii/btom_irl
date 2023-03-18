@@ -17,8 +17,8 @@ def parse_args():
     
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--exp_path", type=str, default="../exp/mceirl")
-    parser.add_argument("--data_path", type=str, default="../data/d4rl/")
+    parser.add_argument("--exp_path", type=str, default="../../exp/mceirl")
+    parser.add_argument("--data_path", type=str, default="../../data/d4rl/")
     parser.add_argument("--filename", type=str, default="hopper-expert-v2.p")
     parser.add_argument("--cp_path", type=str, default="none", help="checkpoint path, default=none")
     # algo args
