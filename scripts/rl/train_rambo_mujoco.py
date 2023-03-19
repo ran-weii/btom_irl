@@ -12,7 +12,7 @@ import torch
 from src.agents.dynamics import EnsembleDynamics, train_ensemble
 from src.agents.rambo import RAMBO
 from src.env.gym_wrapper import GymEnv, get_termination_fn
-from src.algo.logging_utils import SaveCallback
+from src.utils.logging import SaveCallback
 
 def parse_args():
     bool_ = lambda x: x if isinstance(x, bool) else x == "True"

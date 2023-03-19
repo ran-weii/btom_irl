@@ -8,7 +8,7 @@ import pandas as pd
 import torch 
 
 from src.agents.sac import SAC
-from src.algo.logging_utils import SaveCallback
+from src.utils.logging import SaveCallback
 
 def parse_args():
     bool_ = lambda x: x if isinstance(x, bool) else x == "True"

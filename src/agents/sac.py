@@ -10,7 +10,8 @@ import torch.distributions.transforms as torch_transform
 
 # model imports
 from src.agents.nn_models import MLP, DoubleQNetwork
-from src.agents.rl_utils import ReplayBuffer, Logger
+from src.agents.buffer import ReplayBuffer
+from src.utils.logging import Logger
 
 class TanhTransform(torch_transform.Transform):
     """ Adapted from Pytorch implementation with clipping """

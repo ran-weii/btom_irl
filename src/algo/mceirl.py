@@ -7,8 +7,9 @@ import torch.nn as nn
 # model imports
 from src.agents.sac import SAC
 from src.agents.nn_models import MLP
-from src.agents.rl_utils import EpisodeReplayBuffer, Logger
-from src.agents.rl_utils import collate_fn
+from src.agents.buffer import EpisodeReplayBuffer
+from src.utils.data import collate_fn
+from src.utils.logging import Logger
 
 class MCEIRL(SAC):
     """ Maximum causal entropy inverse reinforcement learning with soft actor critic solver """

@@ -5,7 +5,8 @@ import torch
 
 from src.agents.sac import SAC
 from src.agents.dynamics import train_ensemble
-from src.agents.rl_utils import ReplayBuffer, Logger
+from src.agents.buffer import ReplayBuffer
+from src.utils.logging import Logger
 
 class MBPO(SAC):
     """ Model-based policy optimization """

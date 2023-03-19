@@ -6,7 +6,8 @@ import torch.nn as nn
 
 # model imports
 from src.agents.mbpo import MBPO
-from src.agents.rl_utils import EpisodeReplayBuffer, Logger
+from src.agents.buffer import EpisodeReplayBuffer
+from src.utils.logging import Logger
 
 class OfflineIRL(MBPO):
     """ Offline model-based inverse reinforcement learning """

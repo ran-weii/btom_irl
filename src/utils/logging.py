@@ -1,6 +1,8 @@
 import os
 import json
 import datetime
+import pprint
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import torch
@@ -39,6 +41,40 @@ def plot_history(df_history, plot_keys, plot_std=True):
     
     plt.tight_layout()
     return fig, ax
+
+
+class Logger():
+    """ Reinforcement learning stats logger """
+    def __init__(self):
+        self.epoch_dict = dict()
+        self.history = []
+        self.test_episodes = []
+    
+    def push(self, stats_dict):
+        for key, val in stats_dict.items():
+            if not (key in self.epoch_dict.keys()):
+                self.epoch_dict[key] = []
+            self.epoch_dict[key].append(val)
+
+    def log(self, min_max=False, silent=False):
+        stats = dict()
+        for key, val in self.epoch_dict.items():
+            if isinstance(val[0], np.ndarray) or len(val) > 1:
+                vals = np.stack(val)
+                stats[key + "_avg"] = np.mean(vals)
+                stats[key + "_std"] = np.std(vals)
+                if min_max:
+                    stats[key + "_min"] = np.min(vals)
+                    stats[key + "_max"] = np.max(vals)
+            else:
+                stats[key] = val[-1]
+        
+        if not silent:
+            pprint.pprint({k: np.round(v, 4) for k, v, in stats.items()})
+        self.history.append(stats)
+
+        # erase epoch stats
+        self.epoch_dict = dict()
 
 
 class SaveCallback:

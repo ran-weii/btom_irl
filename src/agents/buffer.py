@@ -1,57 +1,6 @@
-import pprint
 import numpy as np
 import torch
-from torch.nn.utils.rnn import pad_sequence
-
-def collate_fn(batch, pad_value=0):
-    """ Collate batch of dict to have the same sequence length """
-    assert isinstance(batch[0], dict)
-    keys = list(batch[0].keys())
-    pad_batch = {k: pad_sequence([b[k] for b in batch], padding_value=pad_value) for k in keys}
-    mask = pad_sequence([torch.ones(len(b[keys[0]])) for b in batch])
-    return pad_batch, mask
-
-def parse_stacked_trajectories(obs, act, rwd, next_obs, terminated, timeout, max_eps=None):
-    eps_id = np.cumsum(terminated + timeout)
-    eps_id = np.insert(eps_id, 0, 0)[:-1] # offset by 1 step
-    max_eps = eps_id.max() + 1 if max_eps is None else max_eps
-
-    dataset = []
-    for e in np.unique(eps_id):
-        dataset.append({
-            "obs": obs[eps_id == e],
-            "act": act[eps_id == e],
-            "rwd": rwd[eps_id == e],
-            "next_obs": next_obs[eps_id == e],
-            "done": terminated[eps_id == e],
-        })
-
-        if (e + 1) >= max_eps:
-            break
-    return dataset
-
-def update_moving_stats(x, old_mean, old_mean_square, old_variance, size, momentum):
-    """ Compute moving mean and variance stats from batch data """
-    batch_size = len(x)
-    new_mean = (old_mean * size + np.sum(x, axis=0)) / (size + batch_size)
-    new_mean_square = (old_mean_square * size + np.sum(x**2, axis=0)) / (size + batch_size)
-    new_variance = new_mean_square - new_mean**2
-    
-    # print(old_mean, size)
-    # print(x.mean(0))
-    # print("new mean", new_mean)
-
-    new_mean = old_mean * momentum + new_mean * (1 - momentum)
-    new_mean_square = old_mean_square * momentum + new_mean_square * (1 - momentum)
-    new_variance = old_variance * momentum + new_variance * (1 - momentum)
-    return new_mean, new_mean_square, new_variance
-
-def normalize(x, mean, variance):
-    return (x - mean) / variance**0.5
-
-def denormalize(x, mean, variance):
-    return x * variance**0.5 + mean
-
+from src.utils.data import update_moving_stats, collate_fn
 
 class ReplayBuffer:
     def __init__(self, obs_dim, act_dim, max_size, momentum=0.1):
@@ -357,37 +306,3 @@ class EpisodeReplayBuffer:
         self.rwd_mean, self.rwd_mean_square, self.rwd_variance = update_moving_stats(
             rwd, self.rwd_mean, self.rwd_mean_square, self.rwd_variance, self.size, self.momentum
         )
-
-
-class Logger():
-    """ Reinforcement learning stats logger """
-    def __init__(self):
-        self.epoch_dict = dict()
-        self.history = []
-        self.test_episodes = []
-    
-    def push(self, stats_dict):
-        for key, val in stats_dict.items():
-            if not (key in self.epoch_dict.keys()):
-                self.epoch_dict[key] = []
-            self.epoch_dict[key].append(val)
-
-    def log(self, min_max=False, silent=False):
-        stats = dict()
-        for key, val in self.epoch_dict.items():
-            if isinstance(val[0], np.ndarray) or len(val) > 1:
-                vals = np.stack(val)
-                stats[key + "_avg"] = np.mean(vals)
-                stats[key + "_std"] = np.std(vals)
-                if min_max:
-                    stats[key + "_min"] = np.min(vals)
-                    stats[key + "_max"] = np.max(vals)
-            else:
-                stats[key] = val[-1]
-        
-        if not silent:
-            pprint.pprint({k: np.round(v, 4) for k, v, in stats.items()})
-        self.history.append(stats)
-
-        # erase epoch stats
-        self.epoch_dict = dict()

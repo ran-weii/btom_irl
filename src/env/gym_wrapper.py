@@ -1,6 +1,6 @@
 import numpy as np
 import gymnasium as gym
-from src.agents.rl_utils import normalize, denormalize
+from src.utils.data import normalize, denormalize
 
 class GymEnv(gym.Env):
     """ Gym wrapper with normalization """

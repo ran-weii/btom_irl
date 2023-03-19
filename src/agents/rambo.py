@@ -5,8 +5,8 @@ import torch
 import torch.nn as nn
 
 from src.agents.mbpo import MBPO
-from src.agents.rl_utils import Logger
-from src.agents.rl_utils import normalize, denormalize
+from src.utils.data import normalize, denormalize
+from src.utils.logging import Logger
 
 class RAMBO(MBPO):
     """ Robust adversarial model-based offline policy optimization """

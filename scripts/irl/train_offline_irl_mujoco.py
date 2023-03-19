@@ -9,9 +9,9 @@ import pandas as pd
 import torch
 
 from src.algo.offline_irl import OfflineIRL
-from src.agents.rl_utils import parse_stacked_trajectories
+from src.utils.data import parse_stacked_trajectories
 from src.env.gym_wrapper import GymEnv
-from src.algo.logging_utils import SaveCallback
+from src.utils.logging import SaveCallback
 
 def parse_args():
     bool_ = lambda x: x if isinstance(x, bool) else x == "True"

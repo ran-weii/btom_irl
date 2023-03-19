@@ -9,8 +9,8 @@ import pandas as pd
 import torch 
 
 from src.algo.wail import WAIL
-from src.agents.rl_utils import parse_stacked_trajectories
-from src.algo.logging_utils import SaveCallback
+from src.utils.data import parse_stacked_trajectories
+from src.utils.logging import SaveCallback
 
 def parse_args():
     bool_ = lambda x: x if isinstance(x, bool) else x == "True"

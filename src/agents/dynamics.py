@@ -6,7 +6,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributions as torch_dist
 from src.agents.nn_models import EnsembleMLP
-from src.agents.rl_utils import normalize, denormalize, Logger
+from src.utils.data import normalize, denormalize
+from src.utils.logging import Logger
 
 def soft_clamp(x, _min, _max):
     x = _max - F.softplus(_max - x)

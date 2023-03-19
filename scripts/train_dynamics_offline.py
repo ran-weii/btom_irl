@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 
 from src.agents.dynamics import EnsembleDynamics, train_ensemble
-from src.algo.logging_utils import SaveCallback
+from src.utils.logging import SaveCallback
 
 def parse_args():
     bool_ = lambda x: x if isinstance(x, bool) else x == "True"

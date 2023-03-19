@@ -9,7 +9,8 @@ from torch.autograd import grad as torch_grad
 # model imports
 from src.agents.sac import SAC
 from src.agents.nn_models import MLP
-from src.agents.rl_utils import EpisodeReplayBuffer, Logger
+from src.agents.buffer import EpisodeReplayBuffer
+from src.utils.logging import Logger
 
 class WAIL(SAC):
     """ Wasserstein adversarial imitation learning """
