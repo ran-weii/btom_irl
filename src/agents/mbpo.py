@@ -304,6 +304,9 @@ class MBPO(SAC):
                 if verbose:
                     round_loss_dict = {k: round(v, 3) for k, v in model_stats_epoch.items()}
                     print(f"e: {epoch + 1}, t model: {t + 1}, {round_loss_dict}")
+                if callback is not None:
+                    for k, v in model_stats_epoch.items():
+                        callback.tb_writer.add_scalar(f"dynamics/{k}", v, t)
                 
                 # generate imagined data
                 rollout_steps = self.compute_rollout_steps(epoch + 1)
@@ -323,6 +326,9 @@ class MBPO(SAC):
                 if (t + 1) % verbose == 0:
                     round_loss_dict = {k: round(v, 3) for k, v in policy_stats_epoch.items()}
                     print(f"e: {epoch + 1}, t policy: {t + 1}, {round_loss_dict}")
+                if callback is not None:
+                    for k, v in policy_stats_epoch.items():
+                        callback.tb_writer.add_scalar(f"policy/{k}", v, t)
 
             # end of epoch handeling
             if (t + 1) > update_after and (t - update_after + 1) % steps_per_epoch == 0:
@@ -331,10 +337,26 @@ class MBPO(SAC):
                 # evaluate episodes
                 if num_eval_eps > 0:
                     eval_eps = []
+                    eval_returns = []
+                    eval_lens = []
                     for i in range(num_eval_eps):
                         eval_eps.append(self.rollout(eval_env, max_steps, sample_mean=eval_deterministic))
+                        eval_returns.append(sum(eval_eps[-1]["rwd"]))
+                        eval_lens.append(sum(1 - eval_eps[-1]["done"]))
+
                         logger.push({"eval_eps_return": sum(eval_eps[-1]["rwd"])})
                         logger.push({"eval_eps_len": sum(1 - eval_eps[-1]["done"])})
+
+                    if callback is not None:
+                        callback.tb_writer.add_scalar("eval/eps_return_mean", np.mean(eval_returns), t)
+                        callback.tb_writer.add_scalar("eval/eps_return_std", np.std(eval_returns), t)
+                        callback.tb_writer.add_scalar("eval/eps_return_min", np.min(eval_returns), t)
+                        callback.tb_writer.add_scalar("eval/eps_return_max", np.max(eval_returns), t)
+
+                        callback.tb_writer.add_scalar("eval/eps_len_mean", np.mean(eval_lens), t)
+                        callback.tb_writer.add_scalar("eval/eps_len_std", np.std(eval_lens), t)
+                        callback.tb_writer.add_scalar("eval/eps_len_min", np.min(eval_lens), t)
+                        callback.tb_writer.add_scalar("eval/eps_len_max", np.max(eval_lens), t)
 
                 logger.push({"epoch": epoch + 1})
                 logger.push({"time": time.time() - start_time})
@@ -342,7 +364,9 @@ class MBPO(SAC):
                 print()
 
                 if t > update_after and callback is not None:
-                    callback(self, pd.DataFrame(logger.history))
+                    callback(self)
+                    callback.tb_writer.add_scalar("time/epoch", epoch + 1, t)
+                    callback.tb_writer.add_scalar("time/time", time.time() - start_time, t)
         
         env.close()
         return logger

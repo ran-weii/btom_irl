@@ -131,7 +131,7 @@ def main(arglist):
 
     if arglist["save"]:
         callback.save_checkpoint(agent)
-        callback.save_history(pd.DataFrame(logger.history))
+        callback.tb_writer.close()
 
 if __name__ == "__main__":
     arglist = parse_args()

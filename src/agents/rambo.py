@@ -276,10 +276,12 @@ class RAMBO(MBPO):
                 if verbose:
                     round_loss_dict = {k: round(v, 3) for k, v in model_stats_epoch.items()}
                     print(f"e: {epoch + 1}, t model: {t + 1}, {round_loss_dict}")
+                if callback is not None:
+                    for k, v in model_stats_epoch.items():
+                        callback.tb_writer.add_scalar(f"dynamics/{k}", v, t)
 
-            # train model
+            # sample model
             if t == 0 or (t + 1) % sample_model_every == 0:
-                # generate imagined data
                 rollout_steps = self.compute_rollout_steps(epoch + 1)
                 self.replay_buffer.max_size = min(
                     self.buffer_size, int(self.model_retain_epochs * self.rollout_batch_size * rollout_steps)
@@ -298,6 +300,9 @@ class RAMBO(MBPO):
             if (t + 1) % verbose == 0:
                 round_loss_dict = {k: round(v, 3) for k, v in policy_stats_epoch.items()}
                 print(f"e: {epoch + 1}, t policy: {t + 1}, {round_loss_dict}")
+            if callback is not None:
+                for k, v in policy_stats_epoch.items():
+                    callback.tb_writer.add_scalar(f"policy/{k}", v, t)
 
             # end of epoch handeling
             if (t + 1) % steps_per_epoch == 0: 
@@ -306,6 +311,9 @@ class RAMBO(MBPO):
                 # evaluate episodes
                 if num_eval_eps > 0:
                     eval_eps = []
+                    eval_returns_est = []
+                    eval_returns = []
+                    eval_lens = []
                     for i in range(num_eval_eps):
                         eval_eps.append(self.rollout(eval_env, max_steps, sample_mean=eval_deterministic))
 
@@ -315,9 +323,30 @@ class RAMBO(MBPO):
                                 eval_eps[-1]["obs"].to(self.device),
                                 eval_eps[-1]["act"].to(self.device)
                             )
-                        logger.push({"eval_eps_est_return": sum(r.cpu())})
+
+                        eval_returns_est.append(r.cpu().sum().data.item())
+                        eval_returns.append(sum(eval_eps[-1]["rwd"]))
+                        eval_lens.append(sum(1 - eval_eps[-1]["done"]))
+
+                        logger.push({"eval_eps_return_est": r.cpu().sum().data.item()})
                         logger.push({"eval_eps_return": sum(eval_eps[-1]["rwd"])})
                         logger.push({"eval_eps_len": sum(1 - eval_eps[-1]["done"])})
+                    
+                    if callback is not None:
+                        callback.tb_writer.add_scalar("eval/eps_return_est_mean", np.mean(eval_returns_est), t)
+                        callback.tb_writer.add_scalar("eval/eps_return_est_std", np.std(eval_returns_est), t)
+                        callback.tb_writer.add_scalar("eval/eps_return_est_min", np.min(eval_returns_est), t)
+                        callback.tb_writer.add_scalar("eval/eps_return_est_max", np.max(eval_returns_est), t)
+
+                        callback.tb_writer.add_scalar("eval/eps_return_mean", np.mean(eval_returns), t)
+                        callback.tb_writer.add_scalar("eval/eps_return_std", np.std(eval_returns), t)
+                        callback.tb_writer.add_scalar("eval/eps_return_min", np.min(eval_returns), t)
+                        callback.tb_writer.add_scalar("eval/eps_return_max", np.max(eval_returns), t)
+
+                        callback.tb_writer.add_scalar("eval/eps_len_mean", np.mean(eval_lens), t)
+                        callback.tb_writer.add_scalar("eval/eps_len_std", np.std(eval_lens), t)
+                        callback.tb_writer.add_scalar("eval/eps_len_min", np.min(eval_lens), t)
+                        callback.tb_writer.add_scalar("eval/eps_len_max", np.max(eval_lens), t)
 
                 logger.push({"epoch": epoch + 1})
                 logger.push({"time": time.time() - start_time})
@@ -325,6 +354,8 @@ class RAMBO(MBPO):
                 print()
 
                 if callback is not None:
-                    callback(self, pd.DataFrame(logger.history))
+                    callback(self)
+                    callback.tb_writer.add_scalar("time/epoch", epoch + 1, t)
+                    callback.tb_writer.add_scalar("time/time", time.time() - start_time, t)
         
         return logger
