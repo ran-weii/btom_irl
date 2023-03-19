@@ -79,10 +79,9 @@ class Logger():
 
 
 class SaveCallback:
-    def __init__(self, arglist, plot_keys, cp_history=None):
+    def __init__(self, arglist, save_path, plot_keys=None, cp_history=None):
         date_time = datetime.datetime.now().strftime("%m-%d-%Y %H-%M-%S")
-        exp_path = os.path.join(arglist["exp_path"])
-        save_path = os.path.join(exp_path, date_time)
+        save_path = os.path.join(save_path, date_time)
         model_path = os.path.join(save_path, "models") # used to save model checkpoint
         if not os.path.exists(save_path):
             os.makedirs(save_path)

@@ -18,7 +18,7 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--exp_path", type=str, default="../exp/mujoco/dynamics")
     parser.add_argument("--data_path", type=str, default="../data/d4rl/")
-    parser.add_argument("--filename", type=str, default="hopper-expert-v2.p")
+    parser.add_argument("--data_name", type=str, default="hopper-expert-v2")
     parser.add_argument("--cp_path", type=str, default="none", help="checkpoint path, default=none")
     # data args
     parser.add_argument("--num_samples", type=int, default=100000, help="number of training transitions, default=100000")
@@ -68,8 +68,8 @@ def main(arglist):
     print(f"device: {device}")
 
     # load data
-    filename = os.path.join(arglist["data_path"], arglist["filename"])
-    with open(filename, "rb") as f:
+    file_path = os.path.join(arglist["data_path"], arglist["data_name"] + ".p")
+    with open(file_path, "rb") as f:
         dataset = pickle.load(f)
 
     # unpack dataset
@@ -131,7 +131,7 @@ def main(arglist):
     # load checkpoint
     cp_history = None
     if arglist["cp_path"] != "none":
-        cp_path = os.path.join(arglist["exp_path"], arglist["cp_path"])
+        cp_path = os.path.join(arglist["exp_path"], arglist["data_name"], arglist["cp_path"])
         
         # load state dict
         cp_model_path = glob.glob(os.path.join(cp_path, "models/*.pt"))
@@ -150,7 +150,8 @@ def main(arglist):
     callback = None
     if arglist["save"]:
         plot_keys = ["obs_loss_avg", "obs_mae", "rwd_loss_avg", "rwd_mae"]
-        callback = SaveCallback(arglist, plot_keys, cp_history=cp_history)
+        save_path = os.path.join(arglist["exp_path"], arglist["data_name"])
+        callback = SaveCallback(arglist, save_path, plot_keys, cp_history=cp_history)
     
     # training loop
     logger = train_ensemble(

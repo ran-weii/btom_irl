@@ -1,8 +1,8 @@
 #! /bin/bash
 python train_rambo.py \
---filename "hopper-medium-expert-v2.p" \
+--filename "halfcheetah-medium-expert-v2.p" \
 --cp_path "none" \
---dynamics_path "../../exp/mujoco/dynamics/03-10-2023 17-31-51" \
+--dynamics_path "../../exp/mujoco/dynamics/halfcheetah-medium-expert-v2/03-18-2023 22-53-52" \
 --num_samples 100000 \
 --norm_obs False \
 --norm_rwd False \
@@ -39,7 +39,7 @@ python train_rambo.py \
 --lr_m 3e-4 \
 --decay "0.000025, 0.00005, 0.000075, 0.0001" \
 --grad_clip 1000. \
---env_name "Hopper-v4" \
+--env_name "HalfCheetah-v4" \
 --pretrain_steps 0 \
 --epochs 2000 \
 --max_steps 1000 \

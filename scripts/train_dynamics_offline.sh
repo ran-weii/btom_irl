@@ -1,6 +1,6 @@
 #! /bin/bash
 python train_dynamics_offline.py \
---filename "hopper-medium-expert-v2.p" \
+--data_name "halfcheetah-medium-expert-v2" \
 --cp_path "none" \
 --num_samples 100000 \
 --ensemble_dim 7 \

@@ -17,7 +17,7 @@ def parse_args():
     
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--exp_path", type=str, default="../../exp/mujoco/irl/mceirl")
+    parser.add_argument("--exp_path", type=str, default="../../exp/mujoco/irl")
     parser.add_argument("--data_path", type=str, default="../../data/d4rl/")
     parser.add_argument("--filename", type=str, default="hopper-expert-v2.p")
     parser.add_argument("--cp_path", type=str, default="none", help="checkpoint path, default=none")
@@ -109,7 +109,7 @@ def main(arglist):
     # load checkpoint
     cp_history = None
     if arglist["cp_path"] != "none":
-        cp_path = os.path.join(arglist["exp_path"], arglist["cp_path"])
+        cp_path = os.path.join(arglist["exp_path"], arglist["env_name"], "mceirl", arglist["cp_path"])
         
         # load state dict
         cp_model_path = glob.glob(os.path.join(cp_path, "models/*.pt"))
@@ -129,7 +129,8 @@ def main(arglist):
     # init save callback
     callback = None
     if arglist["save"]:
-        callback = SaveCallback(arglist, plot_keys, cp_history=cp_history)
+        save_path = os.path.join(arglist["exp_path"], arglist["env_name"], "mceirl")
+        callback = SaveCallback(arglist, save_path)
     
     # training loop
     logger = agent.train(

@@ -15,7 +15,7 @@ def parse_args():
     
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--exp_path", type=str, default="../../exp/mujoco/rl/sac")
+    parser.add_argument("--exp_path", type=str, default="../../exp/mujoco/rl")
     parser.add_argument("--cp_path", type=str, default="none", help="checkpoint path, default=none")
     # algo args
     parser.add_argument("--hidden_dim", type=int, default=128, help="neural network hidden dims, default=64")
@@ -94,7 +94,7 @@ def main(arglist):
     # load checkpoint
     cp_history = None
     if arglist["cp_path"] != "none":
-        cp_path = os.path.join(arglist["exp_path"], arglist["cp_path"])
+        cp_path = os.path.join(arglist["exp_path"], arglist["env_name"], "sac", arglist["cp_path"])
         
         # load state dict
         cp_model_path = glob.glob(os.path.join(cp_path, "models/*.pt"))
@@ -114,7 +114,8 @@ def main(arglist):
     # init save callback
     callback = None
     if arglist["save"]:
-        callback = SaveCallback(arglist, plot_keys, cp_history=cp_history)
+        save_path = os.path.join(arglist["exp_path"], arglist["env_name"], "sac")
+        callback = SaveCallback(arglist, save_path)
     
     # training loop
     eval_env = gym.make(
