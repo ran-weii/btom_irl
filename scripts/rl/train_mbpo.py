@@ -19,7 +19,7 @@ def parse_args():
     
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--exp_path", type=str, default="../../exp/mbpo")
+    parser.add_argument("--exp_path", type=str, default="../../exp/mujoco/rl/mbpo")
     parser.add_argument("--cp_path", type=str, default="none", help="checkpoint path, default=none")
     # algo args
     parser.add_argument("--ensemble_dim", type=int, default=7, help="ensemble size, default=7")

@@ -1,8 +1,8 @@
 #! /bin/bash
-python train_rambo_mujoco.py \
+python train_rambo.py \
 --filename "hopper-medium-expert-v2.p" \
 --cp_path "none" \
---dynamics_path "../../exp/dynamics/03-10-2023 17-31-51" \
+--dynamics_path "../../exp/mujoco/dynamics/03-10-2023 17-31-51" \
 --num_samples 100000 \
 --norm_obs False \
 --norm_rwd False \

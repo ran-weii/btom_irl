@@ -20,11 +20,11 @@ def parse_args():
     
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--exp_path", type=str, default="../../exp/rambo")
+    parser.add_argument("--exp_path", type=str, default="../../exp/mujoco/rl/rambo")
     parser.add_argument("--data_path", type=str, default="../../data/d4rl/")
     parser.add_argument("--filename", type=str, default="hopper-expert-v2.p")
     parser.add_argument("--cp_path", type=str, default="none", help="checkpoint path, default=none")
-    parser.add_argument("--dynamics_path", type=str, default="../../exp/dynamics/02-14-2023 19-22-23", 
+    parser.add_argument("--dynamics_path", type=str, default="../../exp/mujoco/dynamics/02-14-2023 19-22-23", 
         help="pretrained dynamics path, default=none")
     # data args
     parser.add_argument("--num_samples", type=int, default=100000, help="number of training transitions, default=100000")

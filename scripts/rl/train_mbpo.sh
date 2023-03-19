@@ -1,5 +1,5 @@
 #! /bin/bash
-python train_mbpo_mujoco.py \
+python train_mbpo.py \
 --cp_path "none" \
 --ensemble_dim 7 \
 --topk 5 \

@@ -1,5 +1,5 @@
 #! /bin/bash
-python train_offline_irl_mujoco.py \
+python train_offline_irl.py \
 --cp_path "none" \
 --dynamics_path "../exp/dynamics/02-08-2023 20-19-31" \
 --ensemble_dim 5 \

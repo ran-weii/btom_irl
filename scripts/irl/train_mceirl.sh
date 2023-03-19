@@ -1,5 +1,5 @@
 #! /bin/bash
-python train_mceirl_mujoco.py \
+python train_mceirl.py \
 --cp_path "none" \
 --hidden_dim 128 \
 --num_hidden 2 \

@@ -1,5 +1,5 @@
 #! /bin/bash
-python train_wail_mujoco.py \
+python train_wail.py \
 --cp_path "none" \
 --hidden_dim 128 \
 --num_hidden 2 \
