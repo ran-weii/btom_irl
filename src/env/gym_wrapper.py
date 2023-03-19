@@ -107,4 +107,6 @@ def get_termination_fn(env_name, obs_mean=0., obs_variance=1.):
         termination_fn = HalfCheetahTermination(obs_mean, obs_variance).termination_fn
     if "Walker" in env_name:
         termination_fn = WalkerTermination(obs_mean, obs_variance).termination_fn
+    if "Ant" in env_name:
+        termination_fn = AntTermination(obs_mean, obs_variance).termination_fn
     return termination_fn
