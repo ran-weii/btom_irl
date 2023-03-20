@@ -148,7 +148,7 @@ def main(arglist):
     callback = None
     if arglist["save"]:
         save_path = os.path.join(arglist["exp_path"], arglist["env_name"], "wail")
-        callback = SaveCallback(arglist, save_path)
+        callback = SaveCallback(arglist, save_path, plot_keys, cp_history)
     
     # training loop
     render_mode = "human" if arglist["render"] else None
@@ -180,7 +180,7 @@ def main(arglist):
 
     if arglist["save"]:
         callback.save_checkpoint(agent)
-        callback.tb_writer.close()
+        callback.save_history(pd.DataFrame(logger.history))
 
 if __name__ == "__main__":
     arglist = parse_args()

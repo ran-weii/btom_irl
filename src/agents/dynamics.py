@@ -364,10 +364,7 @@ def train_ensemble(
         logger.log(silent=True)
         
         if callback is not None:
-            callback(agent)
-            callback.tb_writer.add_scalar("dynamics/time", time.time() - start_time, e + 1)
-            for k, v in stats_epoch.items():
-                callback.tb_writer.add_scalar(f"dynamics/{k}", v, e + 1)
+            callback(agent, pd.DataFrame(logger.history))
         
         if (e + 1) % verbose == 0:
             print("e: {}, obs_loss: {:.4f}, obs_mae: {:.4f}, rwd_loss: {:.4f}, rwd_mae: {:.4f}, terminate: {}/{}".format(

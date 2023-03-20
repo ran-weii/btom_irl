@@ -151,7 +151,7 @@ def main(arglist):
     if arglist["save"]:
         plot_keys = ["obs_loss_avg", "obs_mae", "rwd_loss_avg", "rwd_mae"]
         save_path = os.path.join(arglist["exp_path"], arglist["data_name"])
-        callback = SaveCallback(arglist, save_path, plot_keys, cp_history=cp_history)
+        callback = SaveCallback(arglist, save_path, plot_keys, cp_history)
     
     # training loop
     logger = train_ensemble(
@@ -172,7 +172,7 @@ def main(arglist):
 
     if arglist["save"]:
         callback.save_checkpoint(agent)
-        callback.tb_writer.close()
+        callback.save_history(pd.DataFrame(logger.history))
 
 if __name__ == "__main__":
     arglist = parse_args()

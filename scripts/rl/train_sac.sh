@@ -14,13 +14,13 @@ python train_sac.py \
 --lr_a 0.0003 \
 --lr_c 0.0003 \
 --grad_clip 100. \
---env_name "Hopper-v4" \
+--env_name "HalfCheetah-v4" \
 --epochs 1000 \
 --max_steps 1000 \
 --steps_per_epoch 1000 \
 --update_after 2000 \
 --update_every 1 \
---cp_every 10 \
+--cp_every 1 \
 --num_eval_eps 5 \
 --eval_deterministic True \
 --verbose 50 \

@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import torch
-from torch.utils.tensorboard import SummaryWriter
 
 def plot_history(df_history, plot_keys, plot_std=True):
     """ Plot learning history
@@ -90,8 +89,6 @@ class SaveCallback:
         # save args
         with open(os.path.join(save_path, "args.json"), "w") as f:
             json.dump(arglist, f)
-        
-        self.tb_writer = SummaryWriter(save_path)
 
         self.save_path = save_path
         self.model_path = model_path
@@ -100,16 +97,17 @@ class SaveCallback:
         self.cp_every = arglist["cp_every"]
         self.iter = 0
     
-    def __call__(self, model):
+    def __call__(self, model, df_history):
         self.iter += 1
         if self.iter % self.cp_every == 0:
+            self.save_history(df_history)
             self.save_checkpoint(model, os.path.join(self.model_path, f"model_{self.iter}.pt"))
     
     def save_history(self, df_history):
-        # if self.cp_history is not None:
-        #     df_history["epoch"] += self.cp_history["epoch"].values[-1] + 1
-        #     df_history["time"] += self.cp_history["time"].values[-1]
-        #     df_history = pd.concat([self.cp_history, df_history], axis=0)
+        if self.cp_history is not None:
+            df_history["epoch"] += self.cp_history["epoch"].values[-1] + 1
+            df_history["time"] += self.cp_history["time"].values[-1]
+            df_history = pd.concat([self.cp_history, df_history], axis=0)
         df_history.to_csv(os.path.join(self.save_path, "history.csv"), index=False)
         
         # save history plot
