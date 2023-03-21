@@ -18,6 +18,7 @@ python train_rambo.py \
 --clip_lv True \
 --residual False \
 --rwd_clip_max 10. \
+--adv_clip_max 6. \
 --obs_penalty 4. \
 --adv_penalty 1. \
 --norm_advantage True \

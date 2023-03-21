@@ -26,6 +26,7 @@ class RAMBO(MBPO):
         tune_beta=True,
         obs_penalty=1., 
         adv_penalty=3e-4, 
+        adv_clip_max=6.,
         norm_advantage=False,
         update_critic_adv=False,
         buffer_size=1e6, 
@@ -62,6 +63,7 @@ class RAMBO(MBPO):
             tune_beta (bool, optional): whether to automatically tune temperature. Default=True
             obs_penalty (float, optional): transition likelihood penalty. Default=1..
             adv_penalty (float, optional): model advantage penalty. Default=3e-4.
+            adv_clip_max (float, optional): advantage clipping threshold. Default=6.
             norm_advantage (bool, optional): whether to normalize advantage. Default=False
             update_adv_critic (bool, optional): whether to udpate critic during model update. Default=False
             buffer_size (int, optional): replay buffer size. Default=1e6
@@ -91,6 +93,7 @@ class RAMBO(MBPO):
         )
         self.obs_penalty = obs_penalty
         self.adv_penalty = adv_penalty
+        self.adv_clip_max = adv_clip_max
         self.norm_advantage = norm_advantage
         self.update_critic_adv = update_critic_adv
         self.plot_keys = [
@@ -121,6 +124,7 @@ class RAMBO(MBPO):
                 advantage_norm = (advantage - advantage.mean(0)) / (advantage.std(0) + 1e-6)
             else:
                 advantage_norm = advantage
+            advantage_norm = advantage_norm.clip(-self.adv_clip_max, self.adv_clip_max)
         
         # compute ensemble mixture log likelihood
         logp_rwd = self.reward.compute_mixture_log_prob(obs_norm, act, rwd_norm)
@@ -161,8 +165,8 @@ class RAMBO(MBPO):
         if self.update_critic_adv:
             adv_q_loss.backward()
         
-        # if self.grad_clip is not None:
-        #     nn.utils.clip_grad_norm_(self.parameters(), self.grad_clip)
+        if self.grad_clip is not None:
+            nn.utils.clip_grad_norm_(self.parameters(), self.grad_clip)
         self.optimizers["reward"].step()
         self.optimizers["dynamics"].step()
         if self.update_critic_adv:
