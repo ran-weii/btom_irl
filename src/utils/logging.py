@@ -21,7 +21,7 @@ def plot_history(df_history, plot_keys, plot_std=True):
     """
     num_cols = len(plot_keys)
     width = min(4 * num_cols, 15)
-    fig, ax = plt.subplots(1, num_cols, figsize=(width, 4))
+    fig, ax = plt.subplots(1, num_cols, figsize=(width, 4), facecolor="w")
     for i in range(num_cols):
         ax[i].plot(df_history["epoch"], df_history[plot_keys[i]])
         if plot_std:
