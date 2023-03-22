@@ -343,7 +343,7 @@ class BTOM(MBPO):
         self.dynamics.update_topk_dist(dynamics_eval_stats)
         with torch.no_grad():
             log_pi = self.compute_action_likelihood(
-                denormalize(eval_data["obs"], self.dynamics.obs_mean.cpu(), self.dynamics.obs_variance.cpu()), 
+                denormalize(eval_data["obs"], self.dynamics.obs_mean, self.dynamics.obs_variance), 
                 eval_data["act"]
             )
         eval_stats = {
@@ -447,6 +447,13 @@ class BTOM(MBPO):
         
         epoch = 0
         for t in range(total_steps):
+            # train reward and dynamics
+            if (t + 1) % update_model_every == 0:
+                btom_stats_dict = self.train_btom_epoch(self.m_steps, self.adv_rollout_steps, logger=logger)
+                if (t + 1) % verbose == 0:
+                    round_loss_dict = {k: round(v, 3) for k, v in btom_stats_dict.items()}
+                    print(f"e: {epoch + 1}, t model: {t + 1}, {round_loss_dict}")
+                    
             # sample model
             if t == 0 or (t + 1) % sample_model_every == 0:
                 rollout_steps = self.compute_rollout_steps(epoch + 1)
@@ -457,13 +464,6 @@ class BTOM(MBPO):
                     self.rollout_batch_size, rollout_steps, mix=False
                 )
                 print("rollout steps", rollout_steps, "replay buffer size", self.replay_buffer.size)
-
-            # train reward and dynamics
-            if (t + 1) % update_model_every == 0:
-                btom_stats_dict = self.train_btom_epoch(self.m_steps, self.adv_rollout_steps, logger=logger)
-                if (t + 1) % verbose == 0:
-                    round_loss_dict = {k: round(v, 3) for k, v in btom_stats_dict.items()}
-                    print(f"e: {epoch + 1}, t model: {t + 1}, {round_loss_dict}")
 
             # train policy
             policy_stats_dict = self.train_policy_epoch(self.compute_reward, logger=logger)
