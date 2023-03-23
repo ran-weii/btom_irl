@@ -8,6 +8,7 @@ from torch.autograd import grad as torch_grad
 
 # model imports
 from src.agents.mbpo import MBPO
+from src.agents.buffer import ReplayBuffer
 from src.utils.data import normalize, denormalize
 from src.utils.logging import Logger
 
@@ -32,6 +33,7 @@ class RAIL(MBPO):
         adv_clip_max=6.,
         obs_penalty=10., 
         adv_penalty=1., 
+        rwd_rollout_steps=5,
         adv_rollout_steps=5,
         norm_advantage=False,
         update_critic_adv=False,
@@ -115,6 +117,7 @@ class RAIL(MBPO):
         self.adv_clip_max = adv_clip_max
         self.obs_penalty = obs_penalty
         self.adv_penalty = adv_penalty
+        self.rwd_rollout_steps = rwd_rollout_steps
         self.adv_rollout_steps = adv_rollout_steps
         self.norm_advantage = norm_advantage
         self.update_critic_adv = update_critic_adv
@@ -129,7 +132,7 @@ class RAIL(MBPO):
         self.optimizers["reward"] = torch.optim.Adam(
             self.reward.parameters(), lr=lr_d
         )
-
+        self.reward_buffer = ReplayBuffer(obs_dim, act_dim, buffer_size, momentum=0.)
         self.plot_keys = [
             "eval_eps_return_avg", "eval_eps_len_avg", "rwd_loss_avg", "adv_loss_avg", 
             "obs_mae_avg", "log_pi_avg", "critic_loss_avg", "actor_loss_avg",  "beta_avg"
@@ -215,7 +218,6 @@ class RAIL(MBPO):
         
         if self.grad_clip is not None:
             nn.utils.clip_grad_norm_(self.parameters(), self.grad_clip)
-        self.optimizers["reward"].step()
         self.optimizers["dynamics"].step()
         if self.update_critic_adv:
             self.optimizers["critic"].step()
@@ -353,7 +355,7 @@ class RAIL(MBPO):
         reward_stats_epoch = []
         for _ in range(self.d_steps):
             real_batch = self.real_buffer.sample(int(self.batch_size/2))
-            fake_batch = self.replay_buffer.sample(int(self.batch_size/2))
+            fake_batch = self.reward_buffer.sample(int(self.batch_size/2))
             
             rwd_loss = self.compute_reward_loss(real_batch, fake_batch)
             gp = self.compute_grad_penalty(real_batch)
@@ -447,6 +449,36 @@ class RAIL(MBPO):
         data["rwd"] = torch.cat(data["rwd"], dim=0)
         data["done"] = torch.cat(data["done"], dim=0)
         return data
+    
+    def sample_imagined_data(self, buffer, batch_size, rollout_steps, mix=True):
+        """ Sample model rollout data and add to replay buffer
+        
+        Args:
+            batch_size (int): rollout batch size
+            rollout_steps (int): model rollout steps
+            mix (bool, optional): whether to mix real and fake initial states
+        """
+        if not mix:
+            batch = self.real_buffer.sample(batch_size)
+        else:
+            real_batch = self.real_buffer.sample(int(batch_size/2))
+            fake_batch = self.replay_buffer.sample(int(batch_size/2))
+            batch = {
+                real_k: torch.cat([real_v, fake_v], dim=0) 
+                for ((real_k, real_v), (fake_k, fake_v)) 
+                in zip(real_batch.items(), fake_batch.items())
+            }
+        
+        rollout_data = self.rollout_dynamics(
+            batch["obs"].to(self.device), batch["done"].to(self.device), rollout_steps
+        )
+        buffer.push_batch(
+            rollout_data["obs"].cpu().numpy(),
+            rollout_data["act"].cpu().numpy(),
+            rollout_data["rwd"].cpu().numpy(),
+            rollout_data["next_obs"].cpu().numpy(),
+            rollout_data["done"].cpu().numpy()
+        )
 
     def train(
         self, 
@@ -455,6 +487,7 @@ class RAIL(MBPO):
         steps_per_epoch, 
         sample_model_every, 
         update_model_every,
+        update_reward_every,
         eval_steps=1000,
         num_eval_eps=0, 
         eval_deterministic=True, 
@@ -467,13 +500,24 @@ class RAIL(MBPO):
         
         epoch = 0
         for t in range(total_steps):
-            # train reward and dynamics
-            if (t + 1) % update_model_every == 0:
+            # train reward
+            if t == 0 or (t + 1) % update_reward_every == 0:
+                self.reward_buffer.clear()
+                rwd_batch_size = self.d_batch_size * self.d_steps // self.rwd_rollout_steps
+                self.sample_imagined_data(
+                    self.reward_buffer, rwd_batch_size, self.rwd_rollout_steps, mix=False
+                )
+                print("rwd batch size", rwd_batch_size, "reward buffer size", self.reward_buffer.size)
                 reward_stats_dict = self.train_reward_epoch(logger=logger)
+                if verbose:
+                    round_loss_dict = {k: round(v, 3) for k, v in reward_stats_dict.items()}
+                    print(f"e: {epoch + 1}, t reward: {t + 1}, {round_loss_dict}")
+
+            # train dynamics
+            if (t + 1) % update_model_every == 0:
                 dynamics_stats_dict = self.train_adversarial_model_epoch(self.m_steps, self.adv_rollout_steps, logger=logger)
-                model_stats_dict = {**reward_stats_dict, **dynamics_stats_dict}
-                if (t + 1) % verbose == 0:
-                    round_loss_dict = {k: round(v, 3) for k, v in model_stats_dict.items()}
+                if verbose:
+                    round_loss_dict = {k: round(v, 3) for k, v in dynamics_stats_dict.items()}
                     print(f"e: {epoch + 1}, t model: {t + 1}, {round_loss_dict}")
                     
             # sample model
@@ -483,7 +527,7 @@ class RAIL(MBPO):
                     self.buffer_size, int(self.model_retain_epochs * self.rollout_batch_size * rollout_steps)
                 )
                 self.sample_imagined_data(
-                    self.rollout_batch_size, rollout_steps, mix=False
+                    self.replay_buffer, self.rollout_batch_size, rollout_steps, mix=False
                 )
                 print("rollout steps", rollout_steps, "replay buffer size", self.replay_buffer.size)
 

@@ -47,6 +47,7 @@ def parse_args():
     parser.add_argument("--adv_clip_max", type=float, default=6., help="clip advantage max value, default=6.")
     parser.add_argument("--obs_penalty", type=float, default=10., help="transition likelihood penalty, default=10.")
     parser.add_argument("--adv_penalty", type=float, default=1., help="model advantage penalty, default=1.")
+    parser.add_argument("--rwd_rollout_steps", type=int, default=5, help="model rollout steps for computing reward loss, default=100")
     parser.add_argument("--adv_rollout_steps", type=int, default=5, help="model rollout steps for computing adversarial loss, default=5")
     parser.add_argument("--norm_advantage", type=bool_, default=True, help="whether to normalize advantage, default=True")
     parser.add_argument("--update_critic_adv", type=bool_, default=False, help="whether to update critic during model training, default=False")
@@ -81,6 +82,7 @@ def parse_args():
     parser.add_argument("--steps_per_epoch", type=int, default=4000)
     parser.add_argument("--sample_model_every", type=int, default=250)
     parser.add_argument("--update_model_every", type=int, default=1000)
+    parser.add_argument("--update_reward_every", type=int, default=1000)
     parser.add_argument("--update_policy_every", type=int, default=50)
     parser.add_argument("--cp_every", type=int, default=10, help="checkpoint interval, default=10")
     parser.add_argument("--eval_steps", type=int, default=1000, help="number of evaluation steps, default=1000")
@@ -192,6 +194,7 @@ def main(arglist):
         adv_clip_max=arglist["adv_clip_max"],
         obs_penalty=arglist["obs_penalty"], 
         adv_penalty=arglist["adv_penalty"], 
+        rwd_rollout_steps=arglist["rwd_rollout_steps"],
         adv_rollout_steps=arglist["adv_rollout_steps"],
         norm_advantage=arglist["norm_advantage"],
         update_critic_adv=arglist["update_critic_adv"],
@@ -290,6 +293,7 @@ def main(arglist):
         arglist["steps_per_epoch"], 
         arglist["sample_model_every"],
         arglist["update_model_every"],
+        arglist["update_reward_every"],
         eval_steps=arglist["eval_steps"],
         num_eval_eps=arglist["num_eval_eps"], 
         eval_deterministic=arglist["eval_deterministic"], 

@@ -22,6 +22,7 @@ python train_rail.py \
 --adv_clip_max 6. \
 --obs_penalty 10. \
 --adv_penalty 1. \
+--rwd_rollout_steps 100 \
 --adv_rollout_steps 5 \
 --norm_advantage True \
 --update_critic_adv True \
@@ -29,8 +30,8 @@ python train_rail.py \
 --d_batch_size 256 \
 --a_batch_size 256 \
 --rollout_batch_size 10000 \
---rollout_min_steps 25 \
---rollout_max_steps 25 \
+--rollout_min_steps 5 \
+--rollout_max_steps 5 \
 --rollout_min_epoch 50 \
 --rollout_max_epoch 200 \
 --model_retain_epochs 1 \
@@ -53,6 +54,7 @@ python train_rail.py \
 --steps_per_epoch 1000 \
 --sample_model_every 250 \
 --update_model_every 250 \
+--update_reward_every 250 \
 --update_policy_every 1 \
 --cp_every 10 \
 --eval_steps 1000 \
