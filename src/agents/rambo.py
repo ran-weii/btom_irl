@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+from torch.autograd import Variable
+from torch.autograd import grad as torch_grad
 
 from src.agents.mbpo import MBPO
 from src.utils.data import normalize, denormalize
@@ -29,6 +31,8 @@ class RAMBO(MBPO):
         adv_clip_max=6.,
         norm_advantage=False,
         update_critic_adv=False,
+        adv_grad_penalty=1., 
+        adv_grad_target=1.,
         buffer_size=1e6, 
         batch_size=200, 
         rollout_batch_size=10000, 
@@ -66,6 +70,8 @@ class RAMBO(MBPO):
             adv_clip_max (float, optional): advantage clipping threshold. Default=6.
             norm_advantage (bool, optional): whether to normalize advantage. Default=False
             update_adv_critic (bool, optional): whether to udpate critic during model update. Default=False
+            adv_grad_penalty (float, optional): model mean gradient penalty weight. Default=1.
+            adv_grad_target (float, optional): model mean gradient penalty target. Default=1.
             buffer_size (int, optional): replay buffer size. Default=1e6
             batch_size (int, optional): actor and critic batch size. Default=100
             rollout_batch_size (int, optional): model_rollout batch size. Default=10000
@@ -96,6 +102,8 @@ class RAMBO(MBPO):
         self.adv_clip_max = adv_clip_max
         self.norm_advantage = norm_advantage
         self.update_critic_adv = update_critic_adv
+        self.adv_grad_penalty = adv_grad_penalty
+        self.adv_grad_target = adv_grad_target
         self.plot_keys = [
             "eval_eps_return_avg", "eval_eps_len_avg", "critic_loss_avg", 
             "actor_loss_avg", "beta_avg", "adv_loss_avg", "obs_mae_avg", 
@@ -153,6 +161,24 @@ class RAMBO(MBPO):
         }
         return adv_loss, adv_q_loss, next_obs, stats
     
+    def compute_grad_penalty(self, model, obs, act):
+        real_inputs = torch.cat([obs, act], dim=-1)
+        real_var = Variable(real_inputs, requires_grad=True)
+        obs_var, act_var = torch.split(real_var, [self.obs_dim, self.act_dim], dim=-1)
+        
+        out_dist = model.compute_dist(obs_var, act_var)
+        mu = out_dist.mean
+        
+        grad = torch_grad(
+            outputs=mu, inputs=real_var, 
+            grad_outputs=torch.ones_like(mu),
+            create_graph=True, retain_graph=True
+        )[0]
+
+        grad_norm = torch.linalg.norm(grad, dim=-1)
+        grad_pen = torch.pow(grad_norm - self.adv_grad_target, 2).mean()
+        return grad_pen
+    
     def take_adversarial_model_gradient_step(self, obs, act, sl_batch):
         self.reward.train()
         self.dynamics.train()
@@ -160,7 +186,13 @@ class RAMBO(MBPO):
         adv_loss, adv_q_loss, next_obs, adv_stats = self.compute_dynamics_adversarial_loss(obs, act)
         reward_loss = self.reward.compute_loss(sl_batch["obs"], sl_batch["act"], sl_batch["rwd"])
         dynamics_loss = self.dynamics.compute_loss(sl_batch["obs"], sl_batch["act"], sl_batch["next_obs"])
-        total_loss = self.obs_penalty * (reward_loss + dynamics_loss) + self.adv_penalty * adv_loss
+        reward_gp = self.compute_grad_penalty(self.reward, obs, act)
+        dynamics_gp = self.compute_grad_penalty(self.dynamics, obs, act)
+        total_loss = (
+            self.adv_penalty * adv_loss + \
+            self.obs_penalty * (reward_loss + dynamics_loss) + \
+            self.adv_grad_penalty * (reward_gp + dynamics_gp)
+        )
         total_loss.backward()
         if self.update_critic_adv:
             adv_q_loss.backward()
@@ -188,6 +220,8 @@ class RAMBO(MBPO):
         stats = {
             "rwd_loss": reward_loss.cpu().data.item(),
             "obs_loss": dynamics_loss.cpu().data.item(),
+            "rwd_gp": reward_gp.cpu().data.item(),
+            "obs_gp": dynamics_gp.cpu().data.item(),
             "adv_loss": adv_loss.cpu().data.item(),
             "critic_adv_loss": adv_q_loss.cpu().data.item(),
             **adv_stats

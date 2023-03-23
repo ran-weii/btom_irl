@@ -48,6 +48,8 @@ def parse_args():
     parser.add_argument("--adv_penalty", type=float, default=3e-4, help="model advantage penalty, default=3e-4")
     parser.add_argument("--norm_advantage", type=bool_, default=True, help="whether to normalize advantage, default=True")
     parser.add_argument("--update_critic_adv", type=bool_, default=False, help="whether to update critic during model training, default=False")
+    parser.add_argument("--adv_grad_penalty", type=float, default=1., help="model mean gradient penalty weight, default=1.")
+    parser.add_argument("--adv_grad_target", type=float, default=1., help="model mean gradient penalty target, default=1.")
     # training args
     parser.add_argument("--buffer_size", type=int, default=1e6, help="replay buffer size, default=1e6")
     parser.add_argument("--batch_size", type=int, default=256, help="training batch size, default=256")
@@ -200,6 +202,8 @@ def main(arglist):
         adv_clip_max=arglist["adv_clip_max"],
         norm_advantage=arglist["norm_advantage"],
         update_critic_adv=arglist["update_critic_adv"],
+        adv_grad_penalty=arglist["adv_grad_penalty"],
+        adv_grad_target=arglist["adv_grad_target"],
         buffer_size=arglist["buffer_size"], 
         batch_size=arglist["batch_size"], 
         rollout_batch_size=arglist["rollout_batch_size"], 

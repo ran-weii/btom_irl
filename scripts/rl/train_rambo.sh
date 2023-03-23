@@ -19,10 +19,12 @@ python train_rambo.py \
 --residual False \
 --rwd_clip_max 10. \
 --adv_clip_max 6. \
---obs_penalty 4. \
+--obs_penalty 10. \
 --adv_penalty 1. \
 --norm_advantage True \
---update_critic_adv True \
+--update_critic_adv False \
+--adv_grad_penalty 1. \
+--adv_grad_target 1. \
 --buffer_size 1000000 \
 --batch_size 256 \
 --rollout_batch_size 50000 \
