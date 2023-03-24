@@ -167,11 +167,11 @@ class RAMBO(MBPO):
         obs_var, act_var = torch.split(real_var, [self.obs_dim, self.act_dim], dim=-1)
         
         out_dist = model.compute_dist(obs_var, act_var)
-        mu = out_dist.mean
+        out_stats = torch.cat([out_dist.mean, out_dist.variance], dim=-1)
         
         grad = torch_grad(
-            outputs=mu, inputs=real_var, 
-            grad_outputs=torch.ones_like(mu),
+            outputs=out_stats, inputs=real_var, 
+            grad_outputs=torch.ones_like(out_stats),
             create_graph=True, retain_graph=True
         )[0]
 
