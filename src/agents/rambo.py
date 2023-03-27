@@ -29,6 +29,7 @@ class RAMBO(MBPO):
         obs_penalty=1., 
         adv_penalty=3e-4, 
         adv_clip_max=6.,
+        adv_include_entropy=False,
         norm_advantage=False,
         update_critic_adv=False,
         adv_grad_penalty=1., 
@@ -36,6 +37,7 @@ class RAMBO(MBPO):
         buffer_size=1e6, 
         batch_size=200, 
         rollout_batch_size=10000, 
+        rollout_deterministic=False,
         rollout_min_steps=1, 
         rollout_max_steps=10, 
         rollout_min_epoch=20, 
@@ -68,6 +70,7 @@ class RAMBO(MBPO):
             obs_penalty (float, optional): transition likelihood penalty. Default=1..
             adv_penalty (float, optional): model advantage penalty. Default=3e-4.
             adv_clip_max (float, optional): advantage clipping threshold. Default=6.
+            adv_include_entropy (bool, optional): whether to include entropy in advantage. Default=False
             norm_advantage (bool, optional): whether to normalize advantage. Default=False
             update_adv_critic (bool, optional): whether to udpate critic during model update. Default=False
             adv_grad_penalty (float, optional): model mean gradient penalty weight. Default=1.
@@ -75,6 +78,7 @@ class RAMBO(MBPO):
             buffer_size (int, optional): replay buffer size. Default=1e6
             batch_size (int, optional): actor and critic batch size. Default=100
             rollout_batch_size (int, optional): model_rollout batch size. Default=10000
+            rollout_deterministic (bool, optional): whether to rollout deterministically. Default=False
             rollout_min_steps (int, optional): initial model rollout steps. Default=1
             rollout_max_steps (int, optional): maximum model rollout steps. Default=10
             rollout_min_epoch (int, optional): epoch to start increasing rollout length. Default=20
@@ -93,13 +97,14 @@ class RAMBO(MBPO):
         super().__init__(
             reward, dynamics, obs_dim, act_dim, act_lim, hidden_dim, num_hidden, activation, 
             gamma, beta, polyak, tune_beta, False, buffer_size, batch_size, 
-            rollout_batch_size, rollout_min_steps, rollout_max_steps, 
+            rollout_batch_size, rollout_deterministic, rollout_min_steps, rollout_max_steps, 
             rollout_min_epoch, rollout_max_epoch, model_retain_epochs,
             real_ratio, eval_ratio, m_steps, a_steps, lr_a, lr_c, lr_m, grad_clip, device
         )
         self.obs_penalty = obs_penalty
         self.adv_penalty = adv_penalty
         self.adv_clip_max = adv_clip_max
+        self.adv_include_entropy = adv_include_entropy
         self.norm_advantage = norm_advantage
         self.update_critic_adv = update_critic_adv
         self.adv_grad_penalty = adv_grad_penalty
@@ -125,7 +130,7 @@ class RAMBO(MBPO):
             next_act, logp = self.sample_action(next_obs)
             q_next_1, q_next_2 = self.critic(next_obs, next_act)
             q_next = torch.min(q_next_1, q_next_2)
-            v_next = q_next - self.beta * logp
+            v_next = q_next - self.adv_include_entropy * (self.beta * logp)
             advantage = rwd + (1 - done) * self.gamma * v_next - q.data
             
             if self.norm_advantage:
@@ -167,7 +172,7 @@ class RAMBO(MBPO):
         obs_var, act_var = torch.split(real_var, [self.obs_dim, self.act_dim], dim=-1)
         
         out_dist = model.compute_dist(obs_var, act_var)
-        out_stats = torch.cat([out_dist.mean, out_dist.variance], dim=-1)
+        out_stats = out_dist.mean
         
         grad = torch_grad(
             outputs=out_stats, inputs=real_var, 
@@ -286,8 +291,6 @@ class RAMBO(MBPO):
         # evaluate
         reward_eval_stats = self.reward.evaluate(eval_data["obs"], eval_data["act"], eval_data["rwd"])
         dynamics_eval_stats = self.dynamics.evaluate(eval_data["obs"], eval_data["act"], eval_data["next_obs"])
-        self.reward.update_topk_dist(reward_eval_stats)
-        self.dynamics.update_topk_dist(dynamics_eval_stats)
         eval_stats = {
             "rwd_mae": reward_eval_stats["mae"],
             "obs_mae": dynamics_eval_stats["mae"],
@@ -302,6 +305,8 @@ class RAMBO(MBPO):
         self, eval_env, max_steps, epochs, steps_per_epoch, sample_model_every, update_model_every,
         rwd_fn=None, num_eval_eps=0, eval_deterministic=True, callback=None, verbose=10
         ):
+        if update_model_every == steps_per_epoch:
+            self.plot_keys[-1] = "obs_mae"
         logger = Logger()
         start_time = time.time()
         total_steps = epochs * steps_per_epoch
@@ -322,7 +327,7 @@ class RAMBO(MBPO):
                     self.buffer_size, int(self.model_retain_epochs * self.rollout_batch_size * rollout_steps)
                 )
                 self.sample_imagined_data(
-                    self.rollout_batch_size, rollout_steps, mix=False
+                    self.replay_buffer, self.rollout_batch_size, rollout_steps, self.rollout_deterministic, mix=False
                 )
                 print("rollout_steps: {}, real buffer size: {}, fake buffer size: {}".format(
                     rollout_steps, self.real_buffer.size, self.replay_buffer.size

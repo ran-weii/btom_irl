@@ -30,30 +30,40 @@ def parse_args():
     parser.add_argument("--num_samples", type=int, default=100000, help="number of training transitions, default=100000")
     parser.add_argument("--norm_obs", type=bool_, default=False, help="normalize observatins, default=False")
     parser.add_argument("--norm_rwd", type=bool_, default=False, help="normalize reward, default=False")
-    # algo args
+    # dynamics args
     parser.add_argument("--ensemble_dim", type=int, default=7, help="ensemble size, default=7")
     parser.add_argument("--topk", type=int, default=5, help="top k models to perform rollout, default=5")
-    parser.add_argument("--hidden_dim", type=int, default=200, help="neural network hidden dims, default=200")
-    parser.add_argument("--num_hidden", type=int, default=2, help="number of hidden layers, default=2")
-    parser.add_argument("--activation", type=str, default="relu", help="neural network activation, default=relu")
+    parser.add_argument("--m_hidden_dim", type=int, default=200, help="dynamics neural network hidden dims, default=200")
+    parser.add_argument("--m_num_hidden", type=int, default=3, help="dynamics number of hidden layers, default=3")
+    parser.add_argument("--m_activation", type=str, default="silu", help="dynamics neural network activation, default=relu")
+    parser.add_argument("--clip_lv", type=bool_, default=True, help="whether to clip observation variance, default=True")
+    parser.add_argument("--residual", type=bool_, default=False, help="whether to predict observation residual, default=False")
+    parser.add_argument("--rwd_clip_max", type=float, default=10., help="clip reward max value, default=10.")
+    parser.add_argument("--adv_clip_max", type=float, default=1000., help="clip advantage max value, default=1000.")
+    parser.add_argument("--min_std", type=float, default=1e-5, help="dynamics minimum prediction std, default=1e-5")
+    parser.add_argument("--max_std", type=float, default=1.6, help="dynamics maximum prediction std, default=1.6")
+    parser.add_argument("--obs_penalty", type=float, default=1., help="transition likelihood penalty, default=1.")
+    parser.add_argument("--adv_penalty", type=float, default=3e-4, help="model advantage penalty, default=3e-4")
+    parser.add_argument("--adv_include_entropy", type=bool_, default=False, help="whether to include entropy in advantage, default=False")
+    parser.add_argument("--norm_advantage", type=bool_, default=True, help="whether to normalize advantage, default=True")
+    parser.add_argument("--update_critic_adv", type=bool_, default=False, help="whether to update critic during model training, default=False")
+    parser.add_argument("--adv_grad_penalty", type=float, default=0., help="model mean gradient penalty weight, default=0.")
+    parser.add_argument("--adv_grad_target", type=float, default=1., help="model mean gradient penalty target, default=1.")
+    parser.add_argument("--decay", type=list_, default=[0.000025, 0.00005, 0.000075, 0.000075, 0.0001], 
+        help="weight decay for each layer, default=[0.000025, 0.00005, 0.000075, 0.000075, 0.0001]")
+    # policy args
+    parser.add_argument("--a_hidden_dim", type=int, default=200, help="policy neural network hidden dims, default=200")
+    parser.add_argument("--a_num_hidden", type=int, default=2, help="policy number of hidden layers, default=2")
+    parser.add_argument("--a_activation", type=str, default="relu", help="policy neural network activation, default=relu")
     parser.add_argument("--gamma", type=float, default=0.99, help="trainer discount factor, default=0.99")
     parser.add_argument("--beta", type=float, default=0.2, help="softmax temperature, default=0.2")
     parser.add_argument("--polyak", type=float, default=0.995, help="polyak averaging factor, default=0.995")
     parser.add_argument("--tune_beta", type=bool_, default=True, help="whether to tune beta, default=True")
-    parser.add_argument("--clip_lv", type=bool_, default=True, help="whether to clip observation variance, default=True")
-    parser.add_argument("--residual", type=bool_, default=False, help="whether to predict observation residual, default=False")
-    parser.add_argument("--rwd_clip_max", type=float, default=10., help="clip reward max value, default=10.")
-    parser.add_argument("--adv_clip_max", type=float, default=6., help="clip advantage max value, default=6.")
-    parser.add_argument("--obs_penalty", type=float, default=1., help="transition likelihood penalty, default=1.")
-    parser.add_argument("--adv_penalty", type=float, default=3e-4, help="model advantage penalty, default=3e-4")
-    parser.add_argument("--norm_advantage", type=bool_, default=True, help="whether to normalize advantage, default=True")
-    parser.add_argument("--update_critic_adv", type=bool_, default=False, help="whether to update critic during model training, default=False")
-    parser.add_argument("--adv_grad_penalty", type=float, default=1., help="model mean gradient penalty weight, default=1.")
-    parser.add_argument("--adv_grad_target", type=float, default=1., help="model mean gradient penalty target, default=1.")
     # training args
     parser.add_argument("--buffer_size", type=int, default=1e6, help="replay buffer size, default=1e6")
     parser.add_argument("--batch_size", type=int, default=256, help="training batch size, default=256")
     parser.add_argument("--rollout_batch_size", type=int, default=50000, help="model rollout batch size, default=50000")
+    parser.add_argument("--rollout_deterministic", type=bool_, default=False, help="whether to rollout deterministically, default=False")
     parser.add_argument("--rollout_min_steps", type=int, default=1, help="min dynamics rollout steps, default=1")
     parser.add_argument("--rollout_max_steps", type=int, default=10, help="max dynamics rollout steps, default=10")
     parser.add_argument("--rollout_min_epoch", type=int, default=20, help="epoch to start increasing rollout steps, default=20")
@@ -66,8 +76,6 @@ def parse_args():
     parser.add_argument("--lr_a", type=float, default=1e-4, help="actor learning rate, default=1e-4")
     parser.add_argument("--lr_c", type=float, default=3e-4, help="critic learning rate, default=3e-4")
     parser.add_argument("--lr_m", type=float, default=3e-4, help="model learning rate, default=3e-4")
-    parser.add_argument("--decay", type=list_, default=[0.000025, 0.00005, 0.000075, 0.0001], 
-        help="weight decay for each layer, default=[0.000025, 0.00005, 0.000075, 0.0001]")
     parser.add_argument("--grad_clip", type=float, default=1000., help="gradient clipping, default=1000.")
     # rollout args
     parser.add_argument("--env_name", type=str, default="Hopper-v4", help="environment name, default=Hopper-v4")
@@ -159,14 +167,16 @@ def main(arglist):
         1,
         arglist["ensemble_dim"],
         arglist["topk"],
-        arglist["hidden_dim"],
-        arglist["num_hidden"],
-        arglist["activation"],
+        arglist["m_hidden_dim"],
+        arglist["m_num_hidden"],
+        arglist["m_activation"],
         arglist["decay"],
         clip_lv=arglist["clip_lv"],
         residual=False,
         termination_fn=None,
         max_mu=arglist["rwd_clip_max"],
+        min_std=arglist["min_std"],
+        max_std=arglist["max_std"],
         device=device
     )
     dynamics = EnsembleDynamics(
@@ -175,13 +185,15 @@ def main(arglist):
         obs_dim,
         arglist["ensemble_dim"],
         arglist["topk"],
-        arglist["hidden_dim"],
-        arglist["num_hidden"],
-        arglist["activation"],
+        arglist["m_hidden_dim"],
+        arglist["m_num_hidden"],
+        arglist["m_activation"],
         arglist["decay"],
         clip_lv=arglist["clip_lv"],
         residual=arglist["residual"],
         termination_fn=termination_fn,
+        min_std=arglist["min_std"],
+        max_std=arglist["max_std"],
         device=device
     )
     agent = RAMBO(
@@ -190,9 +202,9 @@ def main(arglist):
         obs_dim, 
         act_dim, 
         act_lim, 
-        arglist["hidden_dim"], 
-        arglist["num_hidden"], 
-        arglist["activation"],
+        arglist["a_hidden_dim"], 
+        arglist["a_num_hidden"], 
+        arglist["a_activation"],
         gamma=arglist["gamma"], 
         beta=arglist["beta"], 
         polyak=arglist["polyak"],
@@ -207,6 +219,7 @@ def main(arglist):
         buffer_size=arglist["buffer_size"], 
         batch_size=arglist["batch_size"], 
         rollout_batch_size=arglist["rollout_batch_size"], 
+        rollout_deterministic=arglist["rollout_deterministic"],
         rollout_min_steps=arglist["rollout_min_steps"], 
         rollout_max_steps=arglist["rollout_max_steps"], 
         rollout_min_epoch=arglist["rollout_min_epoch"], 

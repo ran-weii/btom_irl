@@ -28,6 +28,7 @@ class MBPO(SAC):
         buffer_size=1e6, 
         batch_size=200, 
         rollout_batch_size=10000, 
+        rollout_deterministic=False,
         rollout_min_steps=1, 
         rollout_max_steps=10, 
         rollout_min_epoch=20, 
@@ -61,6 +62,7 @@ class MBPO(SAC):
             buffer_size (int, optional): replay buffer size. Default=1e6
             batch_size (int, optional): actor and critic batch size. Default=100
             rollout_batch_size (int, optional): model_rollout batch size. Default=10000
+            rollout_deterministic (bool, optional): whether to rollout deterministically. Default=False
             rollout_min_steps (int, optional): initial model rollout steps. Default=1
             rollout_max_steps (int, optional): maximum model rollout steps. Default=10
             rollout_min_epoch (int, optional): epoch to start increasing rollout length. Default=20
@@ -83,6 +85,7 @@ class MBPO(SAC):
         )
         self.norm_obs = norm_obs
         self.rollout_batch_size = rollout_batch_size
+        self.rollout_deterministic = rollout_deterministic
         self.rollout_min_steps = rollout_min_steps
         self.rollout_max_steps = rollout_max_steps
         self.rollout_min_epoch = rollout_min_epoch # used to calculate rollout steps
@@ -172,13 +175,14 @@ class MBPO(SAC):
         policy_stats_epoch = pd.DataFrame(policy_stats_epoch).mean(0).to_dict()
         return policy_stats_epoch
     
-    def rollout_dynamics(self, obs, done, rollout_steps):
+    def rollout_dynamics(self, obs, done, rollout_steps, rollout_deterministic=False):
         """ Rollout dynamics model
 
         Args:
             obs (torch.tensor): observations. size=[batch_size, obs_dim]
             done (torch.tensor): done flag. size=[batch_size, 1]
             rollout_steps (int): number of rollout steps.
+            rollout_deterministic (bool, optional): whether to rollout deterministically. Default=False
 
         Returns:
             data (dict): size=[rollout_steps, batch_size, dim]
@@ -192,8 +196,8 @@ class MBPO(SAC):
         for t in range(rollout_steps):
             with torch.no_grad():
                 act = self.choose_action(obs)
-                rwd, _ = self.reward.step(obs, act)
-                next_obs, done = self.dynamics.step(obs, act)
+                rwd, _ = self.reward.step(obs, act, sample_mean=rollout_deterministic)
+                next_obs, done = self.dynamics.step(obs, act, sample_mean=rollout_deterministic)
 
             data["obs"].append(obs)
             data["act"].append(act)
@@ -212,12 +216,14 @@ class MBPO(SAC):
         data["done"] = torch.cat(data["done"], dim=0)
         return data
     
-    def sample_imagined_data(self, batch_size, rollout_steps, mix=True):
+    def sample_imagined_data(self, buffer, batch_size, rollout_steps, rollout_deterministic=False, mix=True):
         """ Sample model rollout data and add to replay buffer
         
         Args:
+            buffer (ReplayBuffer): replay buffer to store data
             batch_size (int): rollout batch size
             rollout_steps (int): model rollout steps
+            rollout_deterministic (bool, optional): whether to rollout deterministically. Default=False
             mix (bool, optional): whether to mix real and fake initial states
         """
         if not mix:
@@ -232,9 +238,12 @@ class MBPO(SAC):
             }
         
         rollout_data = self.rollout_dynamics(
-            batch["obs"].to(self.device), batch["done"].to(self.device), rollout_steps
+            batch["obs"].to(self.device), 
+            batch["done"].to(self.device), 
+            rollout_steps,
+            rollout_deterministic=rollout_deterministic
         )
-        self.replay_buffer.push_batch(
+        buffer.push_batch(
             rollout_data["obs"].cpu().numpy(),
             rollout_data["act"].cpu().numpy(),
             rollout_data["rwd"].cpu().numpy(),
@@ -311,7 +320,7 @@ class MBPO(SAC):
                     self.buffer_size, int(self.model_retain_epochs * self.rollout_batch_size * rollout_steps)
                 )
                 self.sample_imagined_data(
-                    self.rollout_batch_size, rollout_steps, mix=False
+                    self.replay_buffer, self.rollout_batch_size, rollout_steps, self.rollout_deterministic, mix=False
                 )
                 print("rollout_steps: {}, real buffer size: {}, fake buffer size: {}".format(
                     rollout_steps, self.real_buffer.size, self.replay_buffer.size
