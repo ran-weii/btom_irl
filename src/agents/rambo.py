@@ -110,8 +110,8 @@ class RAMBO(MBPO):
         self.adv_grad_penalty = adv_grad_penalty
         self.adv_grad_target = adv_grad_target
         self.plot_keys = [
-            "eval_eps_return_avg", "eval_eps_len_avg", "critic_loss_avg", 
-            "actor_loss_avg", "beta_avg", "adv_loss_avg", "obs_mae_avg", 
+            "eval_eps_return", "eval_eps_len", "critic_loss", 
+            "actor_loss", "beta", "adv_loss", "obs_mae", 
         ]
     
     def compute_dynamics_adversarial_loss(self, obs, act):
@@ -305,8 +305,6 @@ class RAMBO(MBPO):
         self, eval_env, max_steps, epochs, steps_per_epoch, sample_model_every, update_model_every,
         rwd_fn=None, num_eval_eps=0, eval_deterministic=True, callback=None, verbose=10
         ):
-        if update_model_every == steps_per_epoch:
-            self.plot_keys[-1] = "obs_mae"
         logger = Logger()
         start_time = time.time()
         total_steps = epochs * steps_per_epoch

@@ -134,8 +134,8 @@ class RAIL(MBPO):
         )
         self.reward_buffer = ReplayBuffer(obs_dim, act_dim, buffer_size, momentum=0.)
         self.plot_keys = [
-            "eval_eps_return_avg", "eval_eps_len_avg", "rwd_loss_avg", "adv_loss_avg", 
-            "obs_mae_avg", "log_pi_avg", "critic_loss_avg", "actor_loss_avg",  "beta_avg"
+            "eval_eps_return", "eval_eps_len", "rwd_loss", "adv_loss", 
+            "obs_mae", "log_pi", "critic_loss", "actor_loss",  "beta"
         ]
     
     def update_stats(self):

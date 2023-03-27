@@ -109,8 +109,8 @@ class MBPO(SAC):
         self.real_buffer = ReplayBuffer(obs_dim, act_dim, buffer_size, momentum=0.)
 
         self.plot_keys = [
-            "eval_eps_return_avg", "eval_eps_len_avg", "critic_loss_avg", 
-            "actor_loss_avg", "beta_avg", "rwd_mae_avg", "obs_mae_avg"
+            "eval_eps_return", "eval_eps_len", "critic_loss", 
+            "actor_loss", "beta", "rwd_mae", "obs_mae"
         ]
     
     def update_stats(self):
@@ -146,8 +146,8 @@ class MBPO(SAC):
             verbose=verbose, 
         )
         stats = {
-            "obs_loss": train_logger.history[-1]["obs_loss_avg"],
-            "rwd_loss": train_logger.history[-1]["rwd_loss_avg"],
+            "obs_loss": train_logger.history[-1]["obs_loss"],
+            "rwd_loss": train_logger.history[-1]["rwd_loss"],
             "obs_mae": train_logger.history[-1]["obs_mae"],
             "rwd_mae": train_logger.history[-1]["rwd_mae"],
         }

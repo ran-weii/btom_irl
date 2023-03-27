@@ -90,8 +90,8 @@ class WAIL(SAC):
         self.real_buffer = EpisodeReplayBuffer(obs_dim, act_dim, buffer_size, momentum=0.)
         
         self.plot_keys = [
-            "eval_eps_return_avg", "eval_eps_len_avg", "reward_loss_avg", 
-            "critic_loss_avg", "actor_loss_avg", "log_pi_avg"
+            "eval_eps_return", "eval_eps_len", "reward_loss", 
+            "critic_loss", "actor_loss", "log_pi"
         ]
     
     def fill_real_buffer(self, dataset):

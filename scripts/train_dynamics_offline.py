@@ -155,7 +155,7 @@ def main(arglist):
     # init save callback
     callback = None
     if arglist["save"]:
-        plot_keys = ["obs_loss_avg", "obs_mae", "rwd_loss_avg", "rwd_mae"]
+        plot_keys = ["obs_loss", "obs_mae", "rwd_loss", "rwd_mae"]
         save_path = os.path.join(arglist["exp_path"], arglist["data_name"])
         callback = SaveCallback(arglist, save_path, plot_keys, cp_history)
     

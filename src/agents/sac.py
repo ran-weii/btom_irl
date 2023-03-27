@@ -123,7 +123,7 @@ class SAC(nn.Module):
         
         self.replay_buffer = ReplayBuffer(obs_dim, act_dim, buffer_size, momentum=0.99)
         
-        self.plot_keys = ["eval_eps_return_avg", "eval_eps_len_avg", "critic_loss_avg", "actor_loss_avg", "beta_avg"]
+        self.plot_keys = ["eval_eps_return", "eval_eps_len", "critic_loss", "actor_loss", "beta"]
     
     def sample_action(self, obs, sample_mean=False):
         mu, lv = torch.chunk(self.actor.forward(obs), 2, dim=-1)

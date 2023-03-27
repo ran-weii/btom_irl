@@ -25,7 +25,7 @@ def plot_history(df_history, plot_keys, plot_std=True):
     for i in range(num_cols):
         ax[i].plot(df_history["epoch"], df_history[plot_keys[i]])
         if plot_std:
-            key = plot_keys[i].replace("_avg", "")
+            key = plot_keys[i]
             if key + "_std" in df_history.columns:
                 std = df_history[key + "_std"]
                 ax[i].fill_between(
@@ -56,13 +56,14 @@ class Logger():
                 self.epoch_dict[key] = []
             self.epoch_dict[key].append(val)
 
-    def log(self, min_max=False, silent=False):
+    def log(self, std=True, min_max=False, silent=False):
         stats = dict()
         for key, val in self.epoch_dict.items():
             if isinstance(val[0], np.ndarray) or len(val) > 1:
                 vals = np.stack(val)
-                stats[key + "_avg"] = np.mean(vals)
-                stats[key + "_std"] = np.std(vals)
+                stats[key] = np.mean(vals)
+                if std:
+                    stats[key + "_std"] = np.std(vals)
                 if min_max:
                     stats[key + "_min"] = np.min(vals)
                     stats[key + "_max"] = np.max(vals)
