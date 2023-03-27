@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument("--activation", type=str, default="silu", help="neural network activation, default=silu")
     parser.add_argument("--clip_lv", type=bool_, default=True, help="whether to clip observation variance, default=True")
     parser.add_argument("--residual", type=bool_, default=False, help="whether to predict observation residual, default=False")
-    parser.add_argument("--min_std", type=float, default=1e-5, help="minimum prediction std, default=1e-5")
+    parser.add_argument("--min_std", type=float, default=0.04, help="minimum prediction std, default=0.04")
     parser.add_argument("--max_std", type=float, default=1.6, help="maximum prediction std, default=1.6")
     # training args
     parser.add_argument("--batch_size", type=int, default=256, help="training batch size, default=256")

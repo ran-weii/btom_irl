@@ -10,7 +10,7 @@ python train_dynamics_offline.py \
 --activation silu \
 --clip_lv True \
 --residual False \
---min_std 1e-5 \
+--min_std 0.04 \
 --max_std 1.6 \
 --eval_ratio 0.1 \
 --batch_size 256 \

@@ -84,8 +84,8 @@ class EnsembleDynamics(nn.Module):
 
         topk_dist = torch.ones(ensemble_dim) / ensemble_dim # model selection distribution
         self.topk_dist = nn.Parameter(topk_dist, requires_grad=False)
-        self.min_lv = nn.Parameter(np.log(min_std) * torch.ones(out_dim), requires_grad=False)
-        self.max_lv = nn.Parameter(np.log(max_std) * torch.ones(out_dim), requires_grad=False)
+        self.min_lv = nn.Parameter(np.log(min_std**2) * torch.ones(out_dim), requires_grad=clip_lv)
+        self.max_lv = nn.Parameter(np.log(max_std**2) * torch.ones(out_dim), requires_grad=clip_lv)
 
         self.obs_mean = nn.Parameter(torch.zeros(obs_dim), requires_grad=False)
         self.obs_variance = nn.Parameter(torch.ones(obs_dim), requires_grad=False)
@@ -110,9 +110,9 @@ class EnsembleDynamics(nn.Module):
         mu = torch.clip(mu, -self.max_mu, self.max_mu)
 
         if self.clip_lv:
-            std = torch.exp(soft_clamp(lv, self.min_lv, self.max_lv))
+            std = torch.exp(0.5 * soft_clamp(lv, self.min_lv, self.max_lv))
         else:
-            std = torch.exp(lv.clip(self.min_lv.data, self.max_lv.data))
+            std = torch.exp(0.5 * lv.clip(self.min_lv.data, self.max_lv.data))
         return torch_dist.Normal(mu, std)
     
     def compute_log_prob(self, obs, act, target):
@@ -195,8 +195,9 @@ class EnsembleDynamics(nn.Module):
     def compute_loss(self, obs, act, target):
         """ Compute log likelihood for normalized data and weight decay loss """
         logp = self.compute_log_prob(obs, act, target).sum(-1)
+        clip_loss = 0.001 * self.max_lv.sum() - 0.001 * self.min_lv.sum()
         decay_loss = self.compute_decay_loss()
-        loss = -logp.mean() + decay_loss
+        loss = -logp.mean() + clip_loss + decay_loss
         return loss
     
     def compute_decay_loss(self):
@@ -470,8 +471,8 @@ if __name__ == "__main__":
         assert list(dynamics.obs_variance.shape) == [obs_dim]
         assert list(dynamics.out_mean.shape) == [out_dim]
         assert list(dynamics.out_variance.shape) == [out_dim]
-        assert torch.isclose(dynamics.min_lv.exp(), min_std * torch.ones(1), atol=1e-5).all()
-        assert torch.isclose(dynamics.max_lv.exp(), max_std * torch.ones(1), atol=1e-5).all()
+        assert torch.isclose(dynamics.min_lv.exp() ** 0.5, min_std * torch.ones(1), atol=1e-5).all()
+        assert torch.isclose(dynamics.max_lv.exp() ** 0.5, max_std * torch.ones(1), atol=1e-5).all()
 
         out_dist = dynamics.compute_dist(obs, act)
         logp =  dynamics.compute_log_prob(obs, act, target)
