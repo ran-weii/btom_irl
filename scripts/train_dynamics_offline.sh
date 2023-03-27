@@ -6,17 +6,19 @@ python train_dynamics_offline.py \
 --ensemble_dim 7 \
 --topk 5 \
 --hidden_dim 200 \
---num_hidden 2 \
---activation relu \
+--num_hidden 3 \
+--activation silu \
 --clip_lv True \
 --residual False \
---eval_ratio 0.2 \
+--min_std 1e-5 \
+--max_std 1.6 \
+--eval_ratio 0.1 \
 --batch_size 256 \
---lr 1e-3 \
---decay "0.000025, 0.00005, 0.000075, 0.0001" \
---grad_clip 100. \
---epochs 300 \
---max_epochs_since_update 10 \
+--lr 3e-4 \
+--decay "0.000025, 0.00005, 0.000075, 0.000075, 0.0001" \
+--grad_clip 1000. \
+--epochs 500 \
+--max_epochs_since_update 5 \
 --cp_every 10 \
 --verbose 1 \
 --save False \

@@ -27,18 +27,20 @@ def parse_args():
     parser.add_argument("--ensemble_dim", type=int, default=7, help="ensemble size, default=7")
     parser.add_argument("--topk", type=int, default=5, help="top ensemble to keep when done training, default=5")
     parser.add_argument("--hidden_dim", type=int, default=200, help="neural network hidden dims, default=200")
-    parser.add_argument("--num_hidden", type=int, default=2, help="number of hidden layers, default=2")
-    parser.add_argument("--activation", type=str, default="relu", help="neural network activation, default=relu")
+    parser.add_argument("--num_hidden", type=int, default=3, help="number of hidden layers, default=3")
+    parser.add_argument("--activation", type=str, default="silu", help="neural network activation, default=silu")
     parser.add_argument("--clip_lv", type=bool_, default=True, help="whether to clip observation variance, default=True")
     parser.add_argument("--residual", type=bool_, default=False, help="whether to predict observation residual, default=False")
+    parser.add_argument("--min_std", type=float, default=1e-5, help="minimum prediction std, default=1e-5")
+    parser.add_argument("--max_std", type=float, default=1.6, help="maximum prediction std, default=1.6")
     # training args
     parser.add_argument("--batch_size", type=int, default=256, help="training batch size, default=256")
-    parser.add_argument("--lr", type=float, default=0.001, help="learning rate, default=0.001")
-    parser.add_argument("--decay", type=list_, default=[0.000025, 0.00005, 0.000075, 0.0001], 
-        help="weight decay for each layer, default=[0.000025, 0.00005, 0.000075, 0.0001]")
-    parser.add_argument("--grad_clip", type=float, default=100., help="gradient clipping, default=100.")
+    parser.add_argument("--lr", type=float, default=3e-4, help="learning rate, default=3e-4")
+    parser.add_argument("--decay", type=list_, default=[0.000025, 0.00005, 0.000075, 0.000075, 0.0001], 
+        help="weight decay for each layer, default=[0.000025, 0.00005, 0.000075, 0.000075, 0.0001]")
+    parser.add_argument("--grad_clip", type=float, default=1000., help="gradient clipping, default=1000.")
     parser.add_argument("--epochs", type=int, default=100, help="number of reward training epochs, default=10")
-    parser.add_argument("--max_epochs_since_update", type=int, default=10, help="early stopping condition, default=10")
+    parser.add_argument("--max_epochs_since_update", type=int, default=5, help="early stopping condition, default=5")
     parser.add_argument("--cp_every", type=int, default=10, help="checkpoint interval, default=10")
     parser.add_argument("--verbose", type=int, default=1, help="verbose interval, default=1")
     parser.add_argument("--save", type=bool_, default=True)
@@ -107,6 +109,8 @@ def main(arglist):
         clip_lv=arglist["clip_lv"],
         residual=False,
         termination_fn=None,
+        min_std=arglist["min_std"],
+        max_std=arglist["max_std"],
         device=device
     )
     dynamics = EnsembleDynamics(
@@ -122,6 +126,8 @@ def main(arglist):
         clip_lv=arglist["clip_lv"],
         residual=arglist["residual"],
         termination_fn=None,
+        min_std=arglist["min_std"],
+        max_std=arglist["max_std"],
         device=device
     )
     agent = DummyAgent(reward, dynamics, device)

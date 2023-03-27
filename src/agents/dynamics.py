@@ -50,7 +50,7 @@ class EnsembleDynamics(nn.Module):
             termination_fn (func, optional): termination function to output rollout done. Default=None
             max_mu (float): maximum mean prediction. Default=1e5
             min_std (float): minimum standard deviation. Default=1e-5
-            max_std (float): maximum standard deviation. Default=1e-5
+            max_std (float): maximum standard deviation. Default=1.6
             device (torch.device): computing device. default=cpu
         """
         super().__init__()
@@ -144,18 +144,22 @@ class EnsembleDynamics(nn.Module):
         mixture_log_prob = torch.logsumexp(log_prob + log_elites, dim=-2)
         return mixture_log_prob
     
-    def sample_dist(self, obs, act):
+    def sample_dist(self, obs, act, sample_mean=False):
         """ Sample from ensemble 
         
         Args:
             obs (torch.tensor): normalized observations. size=[..., obs_dim]
             act (torch.tensor): normaized actions. size=[..., act_dim]
+            sample_mean (bool, optional): whether to sample mean. Default=False
 
         Returns:
             out (torch.tensor): normalized output sampled from ensemble member in topk_dist. size=[..., out_dim]
         """
         out_dist = self.compute_dist(obs, act)
-        out = out_dist.rsample()
+        if not sample_mean:
+            out = out_dist.rsample()
+        else:
+            out = out_dist.mean
         
         # randomly select from top models
         ensemble_idx = torch_dist.Categorical(self.topk_dist).sample(obs.shape[:-1]).unsqueeze(-1)
@@ -163,19 +167,20 @@ class EnsembleDynamics(nn.Module):
         out = torch.gather(out, -2, ensemble_idx_).squeeze(-2)
         return out
     
-    def step(self, obs, act):
+    def step(self, obs, act, sample_mean=False):
         """ Simulate a step forward with normalization pre and post processing
         
         Args:
             obs (torch.tensor): unnormalized observations. size=[..., obs_dim]
             act (torch.tensor): unnormaized actions. size=[..., act_dim]
+            sample_mean (bool, optional): whether to sample mean. Default=False
 
         Returns:
             out (torch.tensor): sampled unnormalized outputs. size=[..., out_dim]
             done (torch.tensor): done flag. If termination_fn is None, return all zeros. size=[..., 1]
         """
         obs_norm = normalize(obs, self.obs_mean, self.obs_variance)
-        out_norm = self.sample_dist(obs_norm, act)
+        out_norm = self.sample_dist(obs_norm, act, sample_mean=sample_mean)
         out = denormalize(out_norm, self.out_mean, self.out_variance)
 
         if self.termination_fn is not None:
@@ -211,10 +216,10 @@ class EnsembleDynamics(nn.Module):
         with torch.no_grad():
             out_pred = self.compute_dist(obs, act).mean
         
-        obs_mae = torch.abs(out_pred - target.unsqueeze(-2)).mean((0, 2))
+        out_mae = torch.abs(out_pred - target.unsqueeze(-2)).mean((0, 2))
         
-        stats = {f"mae_{i}": obs_mae[i].cpu().data.item() for i in range(self.ensemble_dim)}
-        stats["mae"] = obs_mae.mean().cpu().data.item()
+        stats = {f"mae_{i}": out_mae[i].cpu().data.item() for i in range(self.ensemble_dim)}
+        stats["mae"] = out_mae.mean().cpu().data.item()
         return stats
     
     def update_topk_dist(self, stats):
@@ -307,7 +312,9 @@ def train_ensemble(
     
     logger = Logger()
     start_time = time.time()
-    best_eval = 1e6
+    # best_eval = 1e6
+    ensemble_dim = agent.dynamics.ensemble_dim
+    best_eval = [1e6] * ensemble_dim
     epoch_since_last_update = 0
     for e in range(epochs):
         # shuffle train data
@@ -378,12 +385,17 @@ def train_ensemble(
                 ))
         
         # termination condition based on eval performance
-        current_eval = stats_epoch["obs_mae"]
-        if train_reward:
-            current_eval += stats_epoch["rwd_mae"]
-        improvement = (best_eval - current_eval) / (best_eval + 1e-6)
-        best_eval = min(best_eval, current_eval)
-        if improvement > 0.01:
+        updated = False
+        for m in range(ensemble_dim):
+            current_eval = stats_epoch[f"obs_mae_{m}"]
+            if train_reward:
+                current_eval += stats_epoch[f"rwd_mae_{m}"]
+            improvement = (best_eval[m] - current_eval) / (best_eval[m] + 1e-6)
+            if improvement > 0.01:
+                best_eval[m] = min(best_eval[m], current_eval)
+                updated = True
+
+        if updated:
             epoch_since_last_update = 0
         else:
             epoch_since_last_update += 1
