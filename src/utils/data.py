@@ -1,6 +1,31 @@
+import pickle
 import numpy as np
 import torch
 from torch.nn.utils.rnn import pad_sequence
+
+def load_data(filepath, num_samples):
+    with open(filepath, "rb") as f:
+        dataset = pickle.load(f)
+    
+    # unpack dataset
+    obs = dataset["observations"]
+    act = dataset["actions"]
+    rwd = dataset["rewards"].reshape(-1, 1)
+    next_obs = dataset["next_observations"]
+    terminated = dataset["terminals"].reshape(-1, 1)
+    
+    # subsample data
+    num_samples = min(num_samples, len(obs))
+    idx = np.arange(len(obs))
+    np.random.shuffle(idx)
+    idx = idx[:num_samples]
+
+    obs = obs[idx]
+    act = act[idx]
+    rwd = rwd[idx]
+    next_obs = next_obs[idx]
+    terminated = terminated[idx]
+    return obs, act, rwd, next_obs, terminated
 
 def collate_fn(batch, pad_value=0):
     """ Collate batch of dict to have the same sequence length """

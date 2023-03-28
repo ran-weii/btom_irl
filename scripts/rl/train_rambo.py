@@ -9,6 +9,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import torch 
 
+from src.utils.data import load_data
 from src.agents.dynamics import EnsembleDynamics, train_ensemble
 from src.agents.rambo import RAMBO
 from src.env.gym_wrapper import GymEnv, get_termination_fn
@@ -106,28 +107,8 @@ def main(arglist):
     print(f"device: {device}")
 
     # load data
-    filename = os.path.join(arglist["data_path"], arglist["filename"])
-    with open(filename, "rb") as f:
-        dataset = pickle.load(f)
-    
-    # unpack dataset
-    obs = dataset["observations"]
-    act = dataset["actions"]
-    rwd = dataset["rewards"].reshape(-1, 1)
-    next_obs = dataset["next_observations"]
-    terminated = dataset["terminals"].reshape(-1, 1)
-    
-    # subsample data
-    num_samples = arglist["num_samples"]
-    idx = np.arange(len(obs))
-    np.random.shuffle(idx)
-    idx = idx[:num_samples]
-
-    obs = obs[idx]
-    act = act[idx]
-    rwd = rwd[idx]
-    next_obs = next_obs[idx]
-    terminated = terminated[idx]
+    filepath = os.path.join(arglist["data_path"], arglist["filename"])
+    obs, act, rwd, next_obs, terminated = load_data(filepath, arglist["num_samples"])
     
     # normalize data
     obs_mean = 0.
@@ -212,6 +193,7 @@ def main(arglist):
         obs_penalty=arglist["obs_penalty"], 
         adv_penalty=arglist["adv_penalty"], 
         adv_clip_max=arglist["adv_clip_max"],
+        adv_include_entropy=arglist["adv_include_entropy"],
         norm_advantage=arglist["norm_advantage"],
         update_critic_adv=arglist["update_critic_adv"],
         adv_grad_penalty=arglist["adv_grad_penalty"],

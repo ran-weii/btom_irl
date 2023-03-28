@@ -7,6 +7,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
+from src.utils.data import load_data
 from src.agents.dynamics import EnsembleDynamics, train_ensemble
 from src.utils.logging import SaveCallback
 
@@ -70,28 +71,8 @@ def main(arglist):
     print(f"device: {device}")
 
     # load data
-    file_path = os.path.join(arglist["data_path"], arglist["data_name"] + ".p")
-    with open(file_path, "rb") as f:
-        dataset = pickle.load(f)
-
-    # unpack dataset
-    obs = dataset["observations"]
-    act = dataset["actions"]
-    rwd = dataset["rewards"].reshape(-1, 1)
-    next_obs = dataset["next_observations"]
-    terminated = dataset["terminals"].reshape(-1, 1)
-
-    # subsample data
-    num_samples = arglist["num_samples"]
-    idx = np.arange(len(obs))
-    np.random.shuffle(idx)
-    idx = idx[:num_samples]
-
-    obs = obs[idx]
-    act = act[idx]
-    rwd = rwd[idx]
-    next_obs = next_obs[idx]
-    terminated = terminated[idx]
+    filepath = os.path.join(arglist["data_path"], arglist["data_name"] + ".p")
+    obs, act, rwd, next_obs, terminated = load_data(filepath, arglist["num_samples"])
     
     # init model
     obs_dim = obs.shape[-1]
