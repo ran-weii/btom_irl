@@ -1,6 +1,6 @@
 #! /bin/bash
 python train_dynamics_offline.py \
---data_name "halfcheetah-medium-expert-v2" \
+--data_name "hopper-medium-expert-v2" \
 --cp_path "none" \
 --num_samples 100000 \
 --ensemble_dim 7 \
@@ -8,8 +8,11 @@ python train_dynamics_offline.py \
 --hidden_dim 200 \
 --num_hidden 3 \
 --activation silu \
+--clip_mu True \
 --clip_lv True \
---residual False \
+--residual True \
+--rwd_clip_max 6. \
+--obs_clip_max 3. \
 --min_std 0.04 \
 --max_std 1.6 \
 --eval_ratio 0.1 \

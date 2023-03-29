@@ -26,11 +26,12 @@ class EnsembleDynamics(nn.Module):
         num_hidden, 
         activation, 
         decay=None, 
+        clip_mu=False,
         clip_lv=False, 
         residual=False,
         termination_fn=None, 
-        max_mu=1e5,
-        min_std=1e-5,
+        max_mu=3.,
+        min_std=0.04,
         max_std=1.6,
         device=torch.device("cpu")
         ):
@@ -45,12 +46,13 @@ class EnsembleDynamics(nn.Module):
             num_hidden (int): value network hidden layers
             activation (str): value network activation
             decay ([list, None], optional): weight decay for each dynamics and reward model layer. Default=None.
+            clip_mu (bool, optional): whether to soft clip observation mean. Default=False
             clip_lv (bool, optional): whether to soft clip observation log variance. Default=False
             residual (bool, optional): whether to predict observation residuals. Default=False
             termination_fn (func, optional): termination function to output rollout done. Default=None
-            max_mu (float): maximum mean prediction. Default=1e5
-            min_std (float): minimum standard deviation. Default=1e-5
-            max_std (float): maximum standard deviation. Default=1.6
+            max_mu (float, optional): maximum mean prediction. Default=3.
+            min_std (float, optional): minimum standard deviation. Default=0.04
+            max_std (float, optional): maximum standard deviation. Default=1.6
             device (torch.device): computing device. default=cpu
         """
         super().__init__()
@@ -67,10 +69,10 @@ class EnsembleDynamics(nn.Module):
         self.ensemble_dim = ensemble_dim
         self.topk = topk
         self.decay = decay
+        self.clip_mu = clip_mu
         self.clip_lv = clip_lv
         self.residual = residual
         self.termination_fn = termination_fn
-        self.max_mu = max_mu
         self.device = device
         
         self.mlp = EnsembleMLP(
@@ -84,6 +86,7 @@ class EnsembleDynamics(nn.Module):
 
         topk_dist = torch.ones(ensemble_dim) / ensemble_dim # model selection distribution
         self.topk_dist = nn.Parameter(topk_dist, requires_grad=False)
+        self.max_lm = nn.Parameter(np.log(max_mu) * torch.ones(out_dim), requires_grad=clip_mu)
         self.min_lv = nn.Parameter(np.log(min_std**2) * torch.ones(out_dim), requires_grad=clip_lv)
         self.max_lv = nn.Parameter(np.log(max_std**2) * torch.ones(out_dim), requires_grad=clip_lv)
 
@@ -103,11 +106,15 @@ class EnsembleDynamics(nn.Module):
         obs_act = torch.cat([obs, act], dim=-1)
         mu_, lv = torch.chunk(self.mlp.forward(obs_act), 2, dim=-1)
         
+        if self.clip_mu:
+            mu_ = soft_clamp(mu_, -self.max_lm.exp(), self.max_lm.exp())
+        else:
+            mu_ = torch.clip(mu_, -self.max_lm.exp(), self.max_lm.exp())
+
         if self.residual:
             mu = obs.unsqueeze(-2) + mu_
         else:
             mu = mu_
-        mu = torch.clip(mu, -self.max_mu, self.max_mu)
 
         if self.clip_lv:
             std = torch.exp(0.5 * soft_clamp(lv, self.min_lv, self.max_lv))
@@ -195,9 +202,10 @@ class EnsembleDynamics(nn.Module):
     def compute_loss(self, obs, act, target):
         """ Compute log likelihood for normalized data and weight decay loss """
         logp = self.compute_log_prob(obs, act, target).sum(-1)
-        clip_loss = 0.001 * self.max_lv.sum() - 0.001 * self.min_lv.sum()
+        clip_mu_loss = 0.001 * self.max_lm.sum()
+        clip_lv_loss = 0.001 * self.max_lv.sum() - 0.001 * self.min_lv.sum()
         decay_loss = self.compute_decay_loss()
-        loss = -logp.mean() + clip_loss + decay_loss
+        loss = -logp.mean() + clip_mu_loss + clip_lv_loss + decay_loss
         return loss
     
     def compute_decay_loss(self):

@@ -1,21 +1,23 @@
 #! /bin/bash
 python train_rambo.py \
---filename "halfcheetah-medium-expert-v2.p" \
+--filename "hopper-medium-expert-v2.p" \
 --cp_path "none" \
---dynamics_path "../../exp/mujoco/dynamics/halfcheetah-medium-expert-v2/03-27-2023 18-24-19" \
+--dynamics_path "../../exp/mujoco/dynamics/hopper-medium-expert-v2/03-28-2023 18-08-34" \
 --num_samples 100000 \
---norm_obs False \
+--norm_obs True \
 --norm_rwd False \
 --ensemble_dim 7 \
 --topk 5 \
 --m_hidden_dim 200 \
 --m_num_hidden 3 \
 --m_activation silu \
+--clip_mu True \
 --clip_lv True \
---residual False \
---min_std 1e-5 \
+--residual True \
+--min_std 0.04 \
 --max_std 1.6 \
---rwd_clip_max 10. \
+--rwd_clip_max 6. \
+--obs_clip_max 3. \
 --adv_clip_max 6. \
 --obs_penalty 1. \
 --adv_penalty 3e-4 \
@@ -49,7 +51,7 @@ python train_rambo.py \
 --lr_c 3e-4 \
 --lr_m 3e-4 \
 --grad_clip 1000. \
---env_name "HalfCheetah-v4" \
+--env_name "Hopper-v4" \
 --pretrain_steps 0 \
 --epochs 2000 \
 --max_steps 1000 \

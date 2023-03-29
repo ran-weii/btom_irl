@@ -30,8 +30,11 @@ def parse_args():
     parser.add_argument("--hidden_dim", type=int, default=200, help="neural network hidden dims, default=200")
     parser.add_argument("--num_hidden", type=int, default=3, help="number of hidden layers, default=3")
     parser.add_argument("--activation", type=str, default="silu", help="neural network activation, default=silu")
+    parser.add_argument("--clip_mu", type=bool_, default=True, help="whether to clip observation mean, default=True")
     parser.add_argument("--clip_lv", type=bool_, default=True, help="whether to clip observation variance, default=True")
     parser.add_argument("--residual", type=bool_, default=False, help="whether to predict observation residual, default=False")
+    parser.add_argument("--rwd_clip_max", type=float, default=6., help="reward clipping threshold, default=6.")
+    parser.add_argument("--obs_clip_max", type=float, default=3., help="observation clipping threshold, default=3.")
     parser.add_argument("--min_std", type=float, default=0.04, help="minimum prediction std, default=0.04")
     parser.add_argument("--max_std", type=float, default=1.6, help="maximum prediction std, default=1.6")
     # training args
@@ -87,9 +90,11 @@ def main(arglist):
         arglist["num_hidden"],
         arglist["activation"],
         arglist["decay"],
+        clip_mu=arglist["clip_mu"],
         clip_lv=arglist["clip_lv"],
         residual=False,
         termination_fn=None,
+        max_mu=arglist["rwd_clip_max"],
         min_std=arglist["min_std"],
         max_std=arglist["max_std"],
         device=device
@@ -104,9 +109,11 @@ def main(arglist):
         arglist["num_hidden"],
         arglist["activation"],
         arglist["decay"],
+        clip_mu=arglist["clip_mu"],
         clip_lv=arglist["clip_lv"],
         residual=arglist["residual"],
         termination_fn=None,
+        max_mu=arglist["obs_clip_max"],
         min_std=arglist["min_std"],
         max_std=arglist["max_std"],
         device=device

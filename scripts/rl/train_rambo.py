@@ -37,9 +37,11 @@ def parse_args():
     parser.add_argument("--m_hidden_dim", type=int, default=200, help="dynamics neural network hidden dims, default=200")
     parser.add_argument("--m_num_hidden", type=int, default=3, help="dynamics number of hidden layers, default=3")
     parser.add_argument("--m_activation", type=str, default="silu", help="dynamics neural network activation, default=relu")
+    parser.add_argument("--clip_mu", type=bool_, default=True, help="whether to clip observation mean, default=True")
     parser.add_argument("--clip_lv", type=bool_, default=True, help="whether to clip observation variance, default=True")
     parser.add_argument("--residual", type=bool_, default=False, help="whether to predict observation residual, default=False")
-    parser.add_argument("--rwd_clip_max", type=float, default=10., help="clip reward max value, default=10.")
+    parser.add_argument("--rwd_clip_max", type=float, default=6., help="clip reward max value, default=6.")
+    parser.add_argument("--obs_clip_max", type=float, default=3., help="observation clipping threshold, default=3.")
     parser.add_argument("--adv_clip_max", type=float, default=1000., help="clip advantage max value, default=1000.")
     parser.add_argument("--min_std", type=float, default=1e-5, help="dynamics minimum prediction std, default=1e-5")
     parser.add_argument("--max_std", type=float, default=1.6, help="dynamics maximum prediction std, default=1.6")
@@ -152,6 +154,7 @@ def main(arglist):
         arglist["m_num_hidden"],
         arglist["m_activation"],
         arglist["decay"],
+        clip_mu=arglist["clip_mu"],
         clip_lv=arglist["clip_lv"],
         residual=False,
         termination_fn=None,
@@ -170,9 +173,11 @@ def main(arglist):
         arglist["m_num_hidden"],
         arglist["m_activation"],
         arglist["decay"],
+        clip_mu=arglist["clip_mu"],
         clip_lv=arglist["clip_lv"],
         residual=arglist["residual"],
         termination_fn=termination_fn,
+        max_mu=arglist["obs_clip_max"],
         min_std=arglist["min_std"],
         max_std=arglist["max_std"],
         device=device
