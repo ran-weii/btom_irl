@@ -73,6 +73,7 @@ class EnsembleDynamics(nn.Module):
         self.clip_lv = clip_lv
         self.residual = residual
         self.termination_fn = termination_fn
+        self.max_mu = max_mu
         self.device = device
         
         self.mlp = EnsembleMLP(
@@ -109,7 +110,7 @@ class EnsembleDynamics(nn.Module):
         if self.clip_mu:
             mu_ = soft_clamp(mu_, -self.max_lm.exp(), self.max_lm.exp())
         else:
-            mu_ = torch.clip(mu_, -self.max_lm.exp(), self.max_lm.exp())
+            mu_ = torch.clip(mu_, -self.max_mu, self.max_mu)
 
         if self.residual:
             mu = obs.unsqueeze(-2) + mu_

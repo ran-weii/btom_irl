@@ -191,8 +191,16 @@ class RAMBO(MBPO):
         adv_loss, adv_q_loss, next_obs, adv_stats = self.compute_dynamics_adversarial_loss(obs, act)
         reward_loss = self.reward.compute_loss(sl_batch["obs"], sl_batch["act"], sl_batch["rwd"])
         dynamics_loss = self.dynamics.compute_loss(sl_batch["obs"], sl_batch["act"], sl_batch["next_obs"])
-        reward_gp = self.compute_grad_penalty(self.reward, obs, act)
-        dynamics_gp = self.compute_grad_penalty(self.dynamics, obs, act)
+        reward_gp = self.compute_grad_penalty(
+            self.reward,
+            normalize(obs, self.reward.obs_mean, self.reward.obs_variance), 
+            act
+        )
+        dynamics_gp = self.compute_grad_penalty(
+            self.dynamics,
+            normalize(obs, self.dynamics.obs_mean, self.dynamics.obs_variance), 
+            act
+        )
         total_loss = (
             self.adv_penalty * adv_loss + \
             self.obs_penalty * (reward_loss + dynamics_loss) + \
