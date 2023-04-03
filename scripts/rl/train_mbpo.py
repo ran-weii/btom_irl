@@ -18,7 +18,7 @@ def parse_args():
     list_ = lambda x: [float(i.replace(" ", "")) for i in x.split(",")]
     
     parser = argparse.ArgumentParser()
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--algo", type=str, default="mbpo")
     parser.add_argument("--exp_path", type=str, default="../../exp/mujoco/rl")
     parser.add_argument("--cp_path", type=str, default="none", help="checkpoint path, default=none")
     # dynamics args
@@ -31,7 +31,6 @@ def parse_args():
     parser.add_argument("--residual", type=bool_, default=False, help="whether to predict observation residual, default=False")
     parser.add_argument("--min_std", type=float, default=1e-5, help="dynamics minimum prediction std, default=1e-5")
     parser.add_argument("--max_std", type=float, default=1.6, help="dynamics maximum prediction std, default=1.6")
-    parser.add_argument("--rwd_clip_max", type=float, default=10., help="clip reward max value, default=10.")
     parser.add_argument("--norm_obs", type=bool_, default=True, help="whether to normalize observation, default=True")
     parser.add_argument("--decay", type=list_, default=[0.000025, 0.00005, 0.000075, 0.0001], 
         help="weight decay for each layer, default=[0.000025, 0.00005, 0.000075, 0.0001]")
@@ -75,6 +74,7 @@ def parse_args():
     parser.add_argument("--verbose", type=int, default=10, help="verbose frequency, default=10")
     parser.add_argument("--render", type=bool_, default=False)
     parser.add_argument("--save", type=bool_, default=True)
+    parser.add_argument("--seed", type=int, default=0)
     arglist = parser.parse_args()
 
     arglist = vars(parser.parse_args())
@@ -101,34 +101,16 @@ def main(arglist):
     act_lim = torch.from_numpy(env.action_space.high).to(torch.float32)
     termination_fn = get_termination_fn(arglist["env_name"])
     
-    reward = EnsembleDynamics(
-        obs_dim,
-        act_dim,
-        1,
-        arglist["ensemble_dim"],
-        arglist["topk"],
-        arglist["m_hidden_dim"],
-        arglist["m_num_hidden"],
-        arglist["m_activation"],
-        arglist["decay"],
-        clip_lv=arglist["clip_lv"],
-        residual=False,
-        termination_fn=None,
-        max_mu=arglist["rwd_clip_max"],
-        min_std=arglist["min_std"],
-        max_std=arglist["max_std"],
-        device=device
-    )
     dynamics = EnsembleDynamics(
         obs_dim,
         act_dim,
-        obs_dim,
-        arglist["ensemble_dim"],
-        arglist["topk"],
-        arglist["m_hidden_dim"],
-        arglist["m_num_hidden"],
-        arglist["m_activation"],
-        arglist["decay"],
+        pred_rwd=True,
+        ensemble_dim=arglist["ensemble_dim"],
+        topk=arglist["topk"],
+        hidden_dim=arglist["m_hidden_dim"],
+        num_hidden=arglist["m_num_hidden"],
+        activation=arglist["m_activation"],
+        decay=arglist["decay"],
         clip_lv=arglist["clip_lv"],
         residual=arglist["residual"],
         termination_fn=termination_fn,
@@ -137,7 +119,6 @@ def main(arglist):
         device=device
     )
     agent = MBPO(
-        reward,
         dynamics,
         obs_dim, 
         act_dim, 
@@ -195,7 +176,7 @@ def main(arglist):
     # init save callback
     callback = None
     if arglist["save"]:
-        save_path = os.path.join(arglist["exp_path"], arglist["env_name"], "mbpo")
+        save_path = os.path.join(arglist["exp_path"], arglist["env_name"], arglist["algo"])
         callback = SaveCallback(arglist, save_path, plot_keys, cp_history)
     
     # training loop

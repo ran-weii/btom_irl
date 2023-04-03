@@ -2,7 +2,7 @@
 python train_rambo.py \
 --filename "hopper-medium-expert-v2.p" \
 --cp_path "none" \
---dynamics_path "../../exp/mujoco/dynamics/hopper-medium-expert-v2/03-28-2023 18-08-34" \
+--dynamics_path "../../exp/mujoco/dynamics/hopper-medium-expert-v2/04-02-2023 23-24-49" \
 --num_samples 100000 \
 --norm_obs True \
 --norm_rwd False \
@@ -11,23 +11,19 @@ python train_rambo.py \
 --m_hidden_dim 200 \
 --m_num_hidden 3 \
 --m_activation silu \
---clip_mu True \
 --clip_lv True \
 --residual True \
 --min_std 0.04 \
 --max_std 1.6 \
---rwd_clip_max 6. \
---obs_clip_max 3. \
---adv_clip_max 6. \
 --obs_penalty 1. \
---adv_penalty 3e-4 \
+--adv_penalty 0.08 \
+--adv_clip_max 60. \
+--adv_action_deterministic False \
 --adv_include_entropy False \
 --norm_advantage True \
 --update_critic_adv False \
---adv_grad_penalty 0. \
---adv_grad_target 1. \
 --decay "0.000025, 0.00005, 0.000075, 0.000075, 0.0001" \
---a_hidden_dim 200 \
+--a_hidden_dim 256 \
 --a_num_hidden 2 \
 --a_activation relu \
 --gamma 0.99 \
@@ -45,7 +41,7 @@ python train_rambo.py \
 --model_retain_epochs 4 \
 --real_ratio 0.5 \
 --eval_ratio 0.2 \
---m_steps 500 \
+--m_steps 1000 \
 --a_steps 1 \
 --lr_a 1e-4 \
 --lr_c 3e-4 \
@@ -57,7 +53,7 @@ python train_rambo.py \
 --max_steps 1000 \
 --steps_per_epoch 1000 \
 --sample_model_every 250 \
---update_model_every 250 \
+--update_model_every 1000 \
 --update_policy_every 1 \
 --cp_every 10 \
 --num_eval_eps 5 \

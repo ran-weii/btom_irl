@@ -12,7 +12,6 @@ class MBPO(SAC):
     """ Model-based policy optimization """
     def __init__(
         self, 
-        reward,
         dynamics,
         obs_dim, 
         act_dim, 
@@ -46,7 +45,6 @@ class MBPO(SAC):
         ):
         """
         Args:
-            reward (EnsembleDynamics): reward function as an EnsembleDynamics object
             dynamics (EnsembleDynamics): transition function as an EnsembleDynamics object
             obs_dim (int): observation dimension
             act_dim (int): action dimension
@@ -95,12 +93,8 @@ class MBPO(SAC):
         self.eval_ratio = eval_ratio
         self.m_steps = m_steps
         
-        self.reward = reward
         self.dynamics = dynamics
         
-        self.optimizers["reward"] = torch.optim.Adam(
-            self.reward.parameters(), lr=lr_m
-        )
         self.optimizers["dynamics"] = torch.optim.Adam(
             self.dynamics.parameters(), lr=lr_m, 
         )
@@ -119,8 +113,7 @@ class MBPO(SAC):
         rwd_mean = self.real_buffer.rwd_mean
         rwd_variance = self.real_buffer.rwd_variance
 
-        self.dynamics.update_stats(obs_mean, obs_variance, obs_mean, obs_variance)
-        self.reward.update_stats(obs_mean, obs_variance, rwd_mean, rwd_variance)
+        self.dynamics.update_stats(obs_mean, obs_variance, rwd_mean, rwd_variance)
     
     def train_dynamics_epoch(
         self, steps, update_stats, max_epochs_since_update=5, verbose=10, logger=None
@@ -135,19 +128,18 @@ class MBPO(SAC):
         train_logger = train_ensemble(
             data, 
             self, 
-            self.eval_ratio, 
-            self.batch_size, 
-            steps, 
+            self.optimizers["dynamics"],
+            eval_ratio=self.eval_ratio, 
+            batch_size=self.batch_size, 
+            epochs=steps, 
             grad_clip=self.grad_clip, 
             update_stats=update_stats,
-            train_reward=True,
             update_elites=True,
             max_epoch_since_update=max_epochs_since_update,
             verbose=verbose, 
         )
         stats = {
-            "obs_loss": train_logger.history[-1]["obs_loss"],
-            "rwd_loss": train_logger.history[-1]["rwd_loss"],
+            "obs_loss": train_logger.history[-1]["loss"],
             "obs_mae": train_logger.history[-1]["obs_mae"],
             "rwd_mae": train_logger.history[-1]["rwd_mae"],
         }
@@ -187,7 +179,6 @@ class MBPO(SAC):
         Returns:
             data (dict): size=[rollout_steps, batch_size, dim]
         """
-        self.reward.eval()
         self.dynamics.eval()
         
         obs = obs.clone()
@@ -196,8 +187,7 @@ class MBPO(SAC):
         for t in range(rollout_steps):
             with torch.no_grad():
                 act = self.choose_action(obs)
-                rwd, _ = self.reward.step(obs, act, sample_mean=rollout_deterministic)
-                next_obs, done = self.dynamics.step(obs, act, sample_mean=rollout_deterministic)
+                next_obs, rwd, done = self.dynamics.step(obs, act, sample_mean=rollout_deterministic)
 
             data["obs"].append(obs)
             data["act"].append(act)

@@ -6,11 +6,10 @@ python train_mbpo.py \
 --m_hidden_dim 200 \
 --m_num_hidden 2 \
 --m_activation relu \
---clip_lv False \
+--clip_lv True \
 --residual False \
---min_std 1e-5 \
+--min_std 0.04 \
 --max_std 1.6 \
---rwd_clip_max 10. \
 --norm_obs True \
 --decay "0.000025, 0.00005, 0.000075, 0.0001" \
 --a_hidden_dim 200 \
