@@ -3,16 +3,14 @@ python train_dynamics_offline.py \
 --data_name "hopper-medium-expert-v2" \
 --cp_path "none" \
 --num_samples 100000 \
+--pred_rwd True \
 --ensemble_dim 7 \
 --topk 5 \
 --hidden_dim 200 \
 --num_hidden 3 \
 --activation silu \
---clip_mu True \
 --clip_lv True \
 --residual True \
---rwd_clip_max 6. \
---obs_clip_max 3. \
 --min_std 0.04 \
 --max_std 1.6 \
 --eval_ratio 0.1 \
@@ -21,8 +19,8 @@ python train_dynamics_offline.py \
 --decay "0.000025, 0.00005, 0.000075, 0.000075, 0.0001" \
 --grad_clip 1000. \
 --epochs 500 \
---max_epochs_since_update 5 \
+--max_epochs_since_update 10 \
 --cp_every 10 \
 --verbose 1 \
---save False \
+--save True \
 --seed 0

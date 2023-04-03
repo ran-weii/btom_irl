@@ -25,16 +25,14 @@ def parse_args():
     parser.add_argument("--num_samples", type=int, default=100000, help="number of training transitions, default=100000")
     parser.add_argument("--eval_ratio", type=float, default=0.2, help="train test split ratio, default=0.2")
     # model args
+    parser.add_argument("--pred_rwd", type=bool_, default=True, help="whether to predict reward, default=True")
     parser.add_argument("--ensemble_dim", type=int, default=7, help="ensemble size, default=7")
     parser.add_argument("--topk", type=int, default=5, help="top ensemble to keep when done training, default=5")
     parser.add_argument("--hidden_dim", type=int, default=200, help="neural network hidden dims, default=200")
     parser.add_argument("--num_hidden", type=int, default=3, help="number of hidden layers, default=3")
     parser.add_argument("--activation", type=str, default="silu", help="neural network activation, default=silu")
-    parser.add_argument("--clip_mu", type=bool_, default=True, help="whether to clip observation mean, default=True")
     parser.add_argument("--clip_lv", type=bool_, default=True, help="whether to clip observation variance, default=True")
     parser.add_argument("--residual", type=bool_, default=False, help="whether to predict observation residual, default=False")
-    parser.add_argument("--rwd_clip_max", type=float, default=6., help="reward clipping threshold, default=6.")
-    parser.add_argument("--obs_clip_max", type=float, default=3., help="observation clipping threshold, default=3.")
     parser.add_argument("--min_std", type=float, default=0.04, help="minimum prediction std, default=0.04")
     parser.add_argument("--max_std", type=float, default=1.6, help="maximum prediction std, default=1.6")
     # training args
@@ -54,14 +52,13 @@ def parse_args():
     return arglist
 
 class DummyAgent(nn.Module):
-    def __init__(self, reward, dynamics, device, lr=1e-3):
+    """ Dummy agent wrapper for dynamics training """
+    def __init__(self, dynamics, device, lr=1e-3):
         super().__init__()
-        self.reward = reward
         self.dynamics = dynamics
         self.device = device
 
         self.optimizers = {
-            "reward": torch.optim.Adam(reward.parameters(), lr=lr),
             "dynamics": torch.optim.Adam(dynamics.parameters(), lr=lr),
         }
 
@@ -80,45 +77,24 @@ def main(arglist):
     # init model
     obs_dim = obs.shape[-1]
     act_dim = act.shape[-1]
-    reward = EnsembleDynamics(
-        obs_dim,
-        act_dim,
-        1,
-        arglist["ensemble_dim"],
-        arglist["topk"],
-        arglist["hidden_dim"],
-        arglist["num_hidden"],
-        arglist["activation"],
-        arglist["decay"],
-        clip_mu=arglist["clip_mu"],
-        clip_lv=arglist["clip_lv"],
-        residual=False,
-        termination_fn=None,
-        max_mu=arglist["rwd_clip_max"],
-        min_std=arglist["min_std"],
-        max_std=arglist["max_std"],
-        device=device
-    )
     dynamics = EnsembleDynamics(
         obs_dim,
         act_dim,
-        obs_dim,
+        arglist["pred_rwd"],
         arglist["ensemble_dim"],
         arglist["topk"],
         arglist["hidden_dim"],
         arglist["num_hidden"],
         arglist["activation"],
         arglist["decay"],
-        clip_mu=arglist["clip_mu"],
         clip_lv=arglist["clip_lv"],
         residual=arglist["residual"],
         termination_fn=None,
-        max_mu=arglist["obs_clip_max"],
         min_std=arglist["min_std"],
         max_std=arglist["max_std"],
         device=device
     )
-    agent = DummyAgent(reward, dynamics, device)
+    agent = DummyAgent(dynamics, device)
     agent.to(device)
     print(agent)
     
@@ -143,7 +119,7 @@ def main(arglist):
     # init save callback
     callback = None
     if arglist["save"]:
-        plot_keys = ["obs_loss", "obs_mae", "rwd_loss", "rwd_mae"]
+        plot_keys = ["loss", "mae"]
         save_path = os.path.join(arglist["exp_path"], arglist["data_name"])
         callback = SaveCallback(arglist, save_path, plot_keys, cp_history)
     
@@ -151,11 +127,11 @@ def main(arglist):
     logger = train_ensemble(
         [obs, act, rwd, next_obs], 
         agent, 
+        agent.optimizers["dynamics"],
         arglist["eval_ratio"], 
         arglist["batch_size"], 
         arglist["epochs"], 
         grad_clip=arglist["grad_clip"], 
-        train_reward=True,
         update_stats=True,
         update_elites=True,
         max_epoch_since_update=arglist["max_epochs_since_update"],
