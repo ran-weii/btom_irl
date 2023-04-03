@@ -251,18 +251,28 @@ class EnsembleDynamics(nn.Module):
         with torch.no_grad():
             next_obs_dist, rwd_dist = self.compute_dists(obs, act)
         
-            mae = torch.abs(next_obs_dist.mean - next_obs.unsqueeze(-2)).mean((0, 2))
-            if self.pred_rwd:
-                mae * self.obs_dim / (self.obs_dim + 1) 
-                mae += torch.abs(rwd_dist.mean - rwd.unsqueeze(-2)).mean((0, 2)) / (self.obs_dim + 1)
+        obs_mae = torch.abs(next_obs_dist.mean - next_obs.unsqueeze(-2)).mean((0, 2))
+        mae = obs_mae
         
-        stats = {f"mae_{i}": mae[i].cpu().data.item() for i in range(self.ensemble_dim)}
+        mae_stats = {f"mae_{i}": mae[i].cpu().data.item() for i in range(self.ensemble_dim)}
+        obs_mae_stats = {f"obs_mae_{i}": obs_mae[i].cpu().data.item() for i in range(self.ensemble_dim)}
+        obs_mae_stats["obs_mae"] = obs_mae.mean().cpu().data.item()
+        rwd_mae_stats = {}
+
+        if self.pred_rwd:
+            rwd_mae = torch.abs(rwd_dist.mean - rwd.unsqueeze(-2)).mean((0, 2))
+            mae = obs_mae * self.obs_dim / (self.obs_dim + 1) + rwd_mae / (self.obs_dim + 1)
+            
+            rwd_mae_stats = {f"rwd_mae_{i}": rwd_mae[i].cpu().data.item() for i in range(self.ensemble_dim)}
+            rwd_mae_stats["rwd_mae"] = rwd_mae.mean().cpu().data.item()
+
+        stats = {**mae_stats, **obs_mae_stats, **rwd_mae_stats}
         stats["mae"] = mae.mean().cpu().data.item()
         return stats
     
     def update_topk_dist(self, stats):
         """ Update top k model selection distribution """
-        maes = [v for k, v in stats.items() if "mae_" in k]
+        maes = [stats[f"mae_{i}"] for i in range(self.ensemble_dim)]
         idx_topk = np.argsort(maes)[:self.topk]
         topk_dist = np.zeros(self.ensemble_dim)
         topk_dist[idx_topk] = 1./self.topk
@@ -422,10 +432,11 @@ def train_ensemble(
             callback(agent, pd.DataFrame(logger.history))
         
         if (e + 1) % verbose == 0:
-            print("e: {}, loss: {:.4f}, mae: {:.4f}, terminate: {}/{}".format(
+            print("e: {}, loss: {:.4f}, obs_mae: {:.4f}, rwd_mae: {:.4f}, terminate: {}/{}".format(
                 e + 1, 
                 stats_epoch["loss"], 
-                stats_epoch["mae"],
+                stats_epoch["obs_mae"],
+                0. if not agent.dynamics.pred_rwd else stats_epoch["rwd_mae"],
                 epoch_since_last_update,
                 max_epoch_since_update,
                 ))
