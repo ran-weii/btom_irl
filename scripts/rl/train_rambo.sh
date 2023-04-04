@@ -2,7 +2,7 @@
 python train_rambo.py \
 --filename "hopper-medium-expert-v2.p" \
 --cp_path "none" \
---dynamics_path "../../exp/mujoco/dynamics/hopper-medium-expert-v2/04-02-2023 23-24-49" \
+--dynamics_path "../../exp/mujoco/dynamics/hopper-medium-expert-v2/04-03-2023 23-24-28" \
 --num_samples 100000 \
 --norm_obs True \
 --norm_rwd False \

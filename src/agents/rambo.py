@@ -215,8 +215,8 @@ class RAMBO(MBPO):
         eval_data = {k:v[-num_eval:].to(self.device) for k, v in data.items()}
 
         # shuffle train data
-        idx_train = np.arange(len(train_data["obs"]))
-        np.random.shuffle(idx_train)
+        ensemble_dim = self.dynamics.ensemble_dim
+        idx_train = np.random.randint(len(train_data["obs"]), size=[len(train_data["obs"]), ensemble_dim])
 
         train_stats_epoch = []
         counter = 0
@@ -247,8 +247,7 @@ class RAMBO(MBPO):
                 idx_start_sl += self.batch_size
                 if idx_start_sl + self.batch_size >= len(train_data["obs"]):
                     idx_start_sl = 0
-                    idx_train = np.arange(len(train_data["obs"]))
-                    np.random.shuffle(idx_train)
+                    idx_train = np.random.randint(len(train_data["obs"]), size=[len(train_data["obs"]), ensemble_dim])
 
         train_stats_epoch = pd.DataFrame(train_stats_epoch).mean(0).to_dict()
 
@@ -323,12 +322,13 @@ class RAMBO(MBPO):
                                 eval_eps[-1]["obs"].to(self.device),
                                 eval_eps[-1]["act"].to(self.device)
                             )
+                            r = denormalize(r.cpu().data.numpy(), eval_env.rwd_mean, eval_env.rwd_variance)
 
-                        eval_returns_est.append(r.cpu().sum().data.item())
+                        eval_returns_est.append(sum(r))
                         eval_returns.append(sum(eval_eps[-1]["rwd"]))
                         eval_lens.append(sum(1 - eval_eps[-1]["done"]))
 
-                        logger.push({"eval_eps_return_est": r.cpu().sum().data.item()})
+                        logger.push({"eval_eps_return_est": sum(r)})
                         logger.push({"eval_eps_return": sum(eval_eps[-1]["rwd"])})
                         logger.push({"eval_eps_len": sum(1 - eval_eps[-1]["done"])})
 

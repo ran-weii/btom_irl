@@ -231,10 +231,10 @@ def main(arglist):
     print(f"real buffer size: {agent.real_buffer.size}")
     
     print("agent norm stats")
-    print(agent.dynamics.obs_mean.data.numpy().round(2))
-    print((agent.dynamics.obs_variance**0.5).data.numpy().round(2))
-    print(agent.dynamics.rwd_mean.data.numpy().round(2))
-    print((agent.dynamics.rwd_variance**0.5).data.numpy().round(2))
+    print(agent.dynamics.obs_mean.cpu().data.numpy().round(2))
+    print((agent.dynamics.obs_variance**0.5).cpu().data.numpy().round(2))
+    print(agent.dynamics.rwd_mean.cpu().data.numpy().round(2))
+    print((agent.dynamics.rwd_variance**0.5).cpu().data.numpy().round(2))
     
     # init save callback
     callback = None
