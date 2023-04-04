@@ -18,6 +18,19 @@ class EnsembleLinear(nn.Module):
         """ Output size=[..., ensemble_dim, output_dim] """
         out = torch.einsum("kio, ...ki -> ...ko", self.weight, x) + self.bias
         return out
+    
+    # def forward_separate(self, x):
+    #     """ Forward each ensemble member separetely 
+        
+    #     Args:
+    #         x (torch.tensor): size=[..., ensemble_dim, input_dim]
+    #         separate (bool, optional): if true forward each ensemble member separately. Default=False
+
+    #     Returns:
+    #         out (torch.tensor): size=[..., ensemble_dim, output_dim]
+    #     """
+    #     out = x.unsqueeze(-2).matmul(self.weight).squeeze(-2) + self.bias
+    #     return out
 
 
 class MLP(nn.Module):
@@ -101,6 +114,19 @@ class EnsembleMLP(nn.Module):
         for layer in self.layers:
             x = layer(x)
         return x
+    
+    def forward_separete(self, x):
+        """ Forward each ensemble member separately 
+        
+        Args:
+            x (torch.tensor): size=[..., ensemble_dim, input_dim]
+
+        Returns:
+            out (torch.tensor): size=[..., ensemble_dim, output_dim] 
+        """
+        for layer in self.layers:
+            x = layer(x)
+        return x
 
 
 class DoubleQNetwork(nn.Module):
@@ -158,11 +184,21 @@ if __name__ == "__main__":
     # synthetic input
     batch_size = 32
     x = torch.randn(batch_size, input_dim)
+    x_separete = torch.randn(batch_size, ensemble_dim, input_dim)
     
     # test ensemble linear
     ensemble_lin = EnsembleLinear(input_dim, output_dim, ensemble_dim)
     out = ensemble_lin(x.unsqueeze(-2).repeat_interleave(ensemble_dim, dim=-2))
+    out_separete = ensemble_lin(x_separete)
+
     assert list(out.shape) == [batch_size, ensemble_dim, output_dim]
+    assert list(out_separete.shape) == [batch_size, ensemble_dim, output_dim]
+    
+    out_separate_true = torch.cat([
+        (x_separete[:, i].matmul(ensemble_lin.weight[i]) + ensemble_lin.bias[i]).unsqueeze(-2) 
+        for i in range(ensemble_dim)
+    ], dim=-2)
+    assert torch.all(torch.isclose(out_separete, out_separate_true, atol=1e-5))
     print("EnsembleLinear passed")
     
     # test ensemble mlp
@@ -174,7 +210,10 @@ if __name__ == "__main__":
         input_dim, output_dim, ensemble_dim, hidden_dim, num_hidden, activation
     )
     out = ensemble_mlp(x)
+    out_separete = ensemble_mlp.forward_separete(x_separete)
+
     assert list(out.shape) == [batch_size, ensemble_dim, output_dim]
+    assert list(out_separete.shape) == [batch_size, ensemble_dim, output_dim]
     print("EnsembleMLP passed")
 
     

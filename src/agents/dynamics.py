@@ -125,6 +125,35 @@ class EnsembleDynamics(nn.Module):
         next_obs_std, rwd_std = torch.split(std, [self.obs_dim, 1], dim=-1)
         return torch_dist.Normal(next_obs_mu, next_obs_std), torch_dist.Normal(rwd_mu, rwd_std)
     
+    def compute_dists_separate(self, obs, act):
+        """ Compute normalized next observation and reward distribution classes 
+            separately for each ensemble member
+        
+        Args:
+            obs (torch.tensor): normalized observations. size=[..., ensemble_dim, obs_dim]
+            act (torch.tensor): actions. size=[..., ensemble_dim, act_dim]
+        
+        Returns:
+            next_obs_dist (torch_dist.Normal): normalized next observation distribution
+            rwd_dist (torch_dist.Normal): normalized reward distribution
+        """
+        obs_act = torch.cat([obs, act], dim=-1)
+        mu_, lv = torch.chunk(self.mlp.forward_separete(obs_act), 2, dim=-1)
+        
+        if self.residual:
+            mu = torch.cat([obs + mu_[..., :-1], mu_[..., -1:]], dim=-1)
+        else:
+            mu = mu_
+
+        if self.clip_lv:
+            std = torch.exp(0.5 * soft_clamp(lv, self.min_lv, self.max_lv))
+        else:
+            std = torch.exp(0.5 * lv.clip(self.min_lv.data, self.max_lv.data))
+
+        next_obs_mu, rwd_mu = torch.split(mu, [self.obs_dim, 1], dim=-1)
+        next_obs_std, rwd_std = torch.split(std, [self.obs_dim, 1], dim=-1)
+        return torch_dist.Normal(next_obs_mu, next_obs_std), torch_dist.Normal(rwd_mu, rwd_std)
+
     def compute_log_prob(self, obs, act, next_obs, rwd):
         """ Compute ensemble log probability 
         
@@ -141,6 +170,24 @@ class EnsembleDynamics(nn.Module):
         next_obs_dist, rwd_dist = self.compute_dists(obs, act)
         logp_obs = next_obs_dist.log_prob(next_obs.unsqueeze(-2)).sum(-1, keepdim=True)
         logp_rwd = rwd_dist.log_prob(rwd.unsqueeze(-2)).sum(-1, keepdim=True)
+        return logp_obs, logp_rwd
+    
+    def compute_log_prob_separate(self, obs, act, next_obs, rwd):
+        """ Compute ensemble log probability separately for each ensemble member 
+        
+        Args:
+            obs (torch.tensor): normalized observations. size=[..., ensemble_dim, obs_dim]
+            act (torch.tensor): actions. size=[..., ensemble_dim, act_dim]
+            next_obs (torch.tensor): normalized next observations. size=[..., ensemble_dim, obs_dim]
+            rwd ([torch.tensor, None]): normalized reward. size=[..., ensemble_dim, 1]
+
+        Returns:
+            logp_obs (torch.tensor): ensemble log probabilities of normalized next observations. size=[..., ensemble_dim, 1]
+            logp_rwd (torch.tensor): ensemble log probabilities of normalized rewards. size=[..., ensemble_dim, 1]
+        """
+        next_obs_dist, rwd_dist = self.compute_dists_separate(obs, act)
+        logp_obs = next_obs_dist.log_prob(next_obs).sum(-1, keepdim=True)
+        logp_rwd = rwd_dist.log_prob(rwd).sum(-1, keepdim=True)
         return logp_obs, logp_rwd
     
     def compute_mixture_log_prob(self, obs, act, next_obs, rwd):
@@ -219,16 +266,16 @@ class EnsembleDynamics(nn.Module):
         return next_obs, rwd, done
     
     def compute_loss(self, obs, act, next_obs, rwd):
-        """ Compute log likelihood for normalized data and weight decay loss """
-        logp_obs, logp_rwd = self.compute_log_prob(obs, act, next_obs, rwd)
+        """ Compute ensemble log likelihood for normalized data and weight decay loss """
+        logp_obs, logp_rwd = self.compute_log_prob_separate(obs, act, next_obs, rwd)
         clip_lv_loss = 0.001 * (
             self.max_lv[:-1].sum() + self.pred_rwd * self.max_lv[-1:].sum() \
             - self.min_lv[:-1].sum() - self.pred_rwd * self.min_lv[-1:].sum()
         )
         decay_loss = self.compute_decay_loss()
         loss = (
-            -logp_obs.sum(-1).mean() \
-            -logp_rwd.sum(-1).mean() * self.pred_rwd \
+            -logp_obs.sum(-1).mean() / self.obs_dim \
+            -logp_rwd.sum(-1).mean() / self.obs_dim * self.pred_rwd \
             + clip_lv_loss \
             + decay_loss
         )
@@ -387,17 +434,23 @@ def train_ensemble(
     start_time = time.time()
     
     ensemble_dim = agent.dynamics.ensemble_dim
+
+    def shuffle_rows(arr):
+        idxs = np.argsort(np.random.uniform(size=arr.shape), axis=-1)
+        return arr[np.arange(arr.shape[0])[:, None], idxs]
+    
+    idx_train = np.random.randint(obs_train.shape[0], size=[ensemble_dim, obs_train.shape[0]])
+
     best_eval = [1e6] * ensemble_dim
     best_params_list = parse_ensemble_params(agent.dynamics)
     epoch_since_last_update = 0
     for e in range(epochs):
         # shuffle train data
-        idx_train = np.arange(len(obs_train))
-        np.random.shuffle(idx_train)
+        idx_train = shuffle_rows(idx_train)
 
         train_stats_epoch = []
         for i in range(0, obs_train.shape[0], batch_size):
-            idx_batch = idx_train[i:i+batch_size]
+            idx_batch = idx_train[:, i:i+batch_size].T
             obs_batch = torch.from_numpy(obs_train[idx_batch]).to(torch.float32).to(agent.dynamics.device)
             act_batch = torch.from_numpy(act_train[idx_batch]).to(torch.float32).to(agent.dynamics.device)
             rwd_batch = torch.from_numpy(rwd_train[idx_batch]).to(torch.float32).to(agent.dynamics.device)
@@ -486,6 +539,11 @@ if __name__ == "__main__":
     rwd = torch.randn(batch_size, 1)
     next_obs = torch.randn(batch_size, obs_dim)
     
+    obs_sep = torch.randn(batch_size, ensemble_dim, obs_dim)
+    act_sep = torch.randn(batch_size, ensemble_dim, act_dim)
+    rwd_sep = torch.randn(batch_size, ensemble_dim, 1)
+    next_obs_sep = torch.randn(batch_size, ensemble_dim, obs_dim)
+
     def test_soft_clamp():
         _min = torch.Tensor([-1.])
         _max = torch.Tensor([1.])
@@ -525,7 +583,7 @@ if __name__ == "__main__":
         assert torch.isclose(dynamics.min_lv.exp() ** 0.5, min_std * torch.ones(1), atol=1e-5).all()
         assert torch.isclose(dynamics.max_lv.exp() ** 0.5, max_std * torch.ones(1), atol=1e-5).all()
         
-        # test method output shapes
+        # test method output shapes on regular batch
         next_obs_dist, rwd_dist = dynamics.compute_dists(obs, act)
         logp_obs, logp_rwd =  dynamics.compute_log_prob(obs, act, next_obs, rwd)
         mix_logp_obs, mix_logp_rwd = dynamics.compute_mixture_log_prob(obs, act, next_obs, rwd)
@@ -546,8 +604,19 @@ if __name__ == "__main__":
         assert list(rwd_step.shape) == [batch_size, 1]
         assert list(done.shape) == [batch_size, 1]
         
+        # test method output shapes on separate batch
+        next_obs_dist, rwd_dist = dynamics.compute_dists_separate(obs_sep, act_sep)
+        logp_obs, logp_rwd =  dynamics.compute_log_prob_separate(obs_sep, act_sep, next_obs_sep, rwd_sep)
+        
+        assert list(next_obs_dist.mean.shape) == [batch_size, ensemble_dim, obs_dim]
+        assert list(rwd_dist.mean.shape) == [batch_size, ensemble_dim, 1]
+        assert list(next_obs_dist.variance.shape) == [batch_size, ensemble_dim, obs_dim]
+        assert list(rwd_dist.variance.shape) == [batch_size, ensemble_dim, 1]
+        assert list(logp_obs.shape) == [batch_size, ensemble_dim, 1]
+        assert list(logp_rwd.shape) == [batch_size, ensemble_dim, 1]
+
         # test backward
-        loss = dynamics.compute_loss(obs, act, next_obs, rwd)
+        loss = dynamics.compute_loss(obs_sep, act_sep, next_obs_sep, rwd_sep)
         loss.backward()
         for n, p in dynamics.named_parameters():
             if "weight" in n or "bias" in n:
