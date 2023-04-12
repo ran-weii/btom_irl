@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import torch.distributions as torch_dist
 from src.agents.nn_models import EnsembleMLP
 from src.utils.data import normalize, denormalize
-from src.utils.logging import Logger
+from src.utils.logger import Logger
 
 def soft_clamp(x, _min, _max):
     x = _max - F.softplus(_max - x)
@@ -264,20 +264,20 @@ class EnsembleDynamics(nn.Module):
         else:
             done = torch.zeros(list(obs.shape)[:-1] + [1]).to(torch.float32).to(self.device)
         return next_obs, rwd, done
-    
-    def compute_loss(self, obs, act, next_obs, rwd):
+
+    def compute_loss(self, obs, act, next_obs, rwd, use_decay=True):
         """ Compute ensemble log likelihood for normalized data and weight decay loss """
         logp_obs, logp_rwd = self.compute_log_prob_separate(obs, act, next_obs, rwd)
+        logp = logp_obs + self.pred_rwd * logp_rwd
         clip_lv_loss = 0.001 * (
             self.max_lv[:-1].sum() + self.pred_rwd * self.max_lv[-1:].sum() \
             - self.min_lv[:-1].sum() - self.pred_rwd * self.min_lv[-1:].sum()
         )
         decay_loss = self.compute_decay_loss()
         loss = (
-            -logp_obs.sum(-1).mean() / self.obs_dim \
-            -logp_rwd.sum(-1).mean() / self.obs_dim * self.pred_rwd \
+            -logp.mean(-1).mean(0).sum(-1) / (self.obs_dim + 1 * self.pred_rwd)
             + clip_lv_loss \
-            + decay_loss
+            + decay_loss * use_decay
         )
         return loss
     
@@ -352,8 +352,15 @@ def set_ensemble_params(ensemble, params_list):
         if "weight" in n or "bias" in n:
             p.data = torch.stack([params_list[i][n] for i in range(ensemble_dim)])
 
+def get_random_index(batch_size, ensemble_dim, bootstrap=True):
+    if bootstrap:
+        return np.stack([np.random.choice(np.arange(batch_size), batch_size, replace=False) for _ in range(ensemble_dim)]).T
+    else:
+        idx = np.random.choice(np.arange(batch_size), batch_size, replace=False)
+        return np.stack([idx for _ in range(ensemble_dim)]).T
+
 def train_ensemble(
-        data, agent, optimizer, eval_ratio, batch_size, epochs, grad_clip=None, 
+        data, agent, optimizer, eval_ratio, batch_size, epochs, bootstrap=True, grad_clip=None, 
         update_stats=True, update_elites=True, max_epoch_since_update=10, 
         verbose=1, callback=None, debug=False
     ):
@@ -365,6 +372,7 @@ def train_ensemble(
         eval_ratio (float): evaluation ratio
         batch_size (int): batch size
         epochs (int): max training epochs
+        bootstrap (bool): whether to use different minibatch ordering for each ensemble member. Default=True
         grad_clip (float): gradient norm clipping. Default=None
         update_stats (bool): whether to normalize data and update reward and dynamics model stats. Default=True
         update_elites (bool): whether to update reward and dynamics topk_dist. Default=True
@@ -435,22 +443,16 @@ def train_ensemble(
     
     ensemble_dim = agent.dynamics.ensemble_dim
 
-    def shuffle_rows(arr):
-        idxs = np.argsort(np.random.uniform(size=arr.shape), axis=-1)
-        return arr[np.arange(arr.shape[0])[:, None], idxs]
-    
-    idx_train = np.random.randint(obs_train.shape[0], size=[ensemble_dim, obs_train.shape[0]])
-
     best_eval = [1e6] * ensemble_dim
     best_params_list = parse_ensemble_params(agent.dynamics)
     epoch_since_last_update = 0
     for e in range(epochs):
         # shuffle train data
-        idx_train = shuffle_rows(idx_train)
-
+        idx_train = get_random_index(obs_train.shape[0], ensemble_dim, bootstrap=bootstrap)
+        
         train_stats_epoch = []
         for i in range(0, obs_train.shape[0], batch_size):
-            idx_batch = idx_train[:, i:i+batch_size].T
+            idx_batch = idx_train[i:i+batch_size]
             obs_batch = torch.from_numpy(obs_train[idx_batch]).to(torch.float32).to(agent.dynamics.device)
             act_batch = torch.from_numpy(act_train[idx_batch]).to(torch.float32).to(agent.dynamics.device)
             rwd_batch = torch.from_numpy(rwd_train[idx_batch]).to(torch.float32).to(agent.dynamics.device)
@@ -517,6 +519,7 @@ def train_ensemble(
     return logger
 
 if __name__ == "__main__":
+    np.random.seed(0)
     torch.manual_seed(0)
     from src.env.gym_wrapper import get_termination_fn
     
@@ -614,30 +617,50 @@ if __name__ == "__main__":
         assert list(rwd_dist.variance.shape) == [batch_size, ensemble_dim, 1]
         assert list(logp_obs.shape) == [batch_size, ensemble_dim, 1]
         assert list(logp_rwd.shape) == [batch_size, ensemble_dim, 1]
-
-        # test backward
-        loss = dynamics.compute_loss(obs_sep, act_sep, next_obs_sep, rwd_sep)
-        loss.backward()
-        for n, p in dynamics.named_parameters():
-            if "weight" in n or "bias" in n:
-                assert p.grad is not None
-        
-        head_bias = dict(dynamics.named_parameters())["mlp.layers.6.bias"]
-        if pred_rwd:
-            assert torch.all(head_bias.grad != 0)
-            if clip_lv:
-                assert torch.all(dynamics.max_lv.grad != 0)
-                assert torch.all(dynamics.min_lv.grad != 0)
-        else:
-            assert not torch.all(head_bias.grad != 0)
-            if clip_lv:
-                assert not torch.all(dynamics.max_lv.grad != 0)
-                assert not torch.all(dynamics.min_lv.grad != 0)
         
         # test eval
         stats = dynamics.evaluate(obs, act, next_obs, rwd)
         dynamics.update_topk_dist(stats)
         assert sum(dynamics.topk_dist == 0) == (dynamics.ensemble_dim - dynamics.topk)
+
+        # test gradients: drop one member and check no gradients
+        logp_obs, logp_rwd = dynamics.compute_log_prob_separate(obs_sep, act_sep, next_obs_sep, rwd_sep)
+        loss = torch.mean(logp_obs[:, :-1] + logp_rwd[:, :-1])
+        loss.backward()
+        
+        head_weight = dict(dynamics.named_parameters())["mlp.layers.6.weight"]
+        head_bias = dict(dynamics.named_parameters())["mlp.layers.6.bias"]
+
+        assert torch.all(head_weight.grad[-1] == 0)
+        assert torch.all(head_bias.grad[-1] == 0)
+
+        for n, p in dynamics.named_parameters():
+            if p.grad is not None:
+                p.grad.zero_()
+
+        # test gradients: check reward head gradients
+        loss = dynamics.compute_loss(obs_sep, act_sep, next_obs_sep, rwd_sep, use_decay=False)
+        loss.backward()
+        
+        head_weight = dict(dynamics.named_parameters())["mlp.layers.6.weight"]
+        head_bias = dict(dynamics.named_parameters())["mlp.layers.6.bias"]
+        
+        if pred_rwd:
+            assert torch.all(head_weight.grad[:, :, obs_dim] != 0)
+            assert torch.all(head_weight.grad[:, :, obs_dim * 2 + 1] != 0)
+            assert torch.all(head_bias.grad[:, obs_dim] != 0)
+            assert torch.all(head_bias.grad[:, obs_dim * 2 + 1] != 0)
+            if clip_lv:
+                assert torch.all(dynamics.min_lv.grad[obs_dim] != 0)
+                assert torch.all(dynamics.max_lv.grad[obs_dim] != 0)
+        else:
+            assert torch.all(head_weight.grad[:, :, obs_dim] == 0)
+            assert torch.all(head_weight.grad[:, :, obs_dim * 2 + 1] == 0)
+            assert torch.all(head_bias.grad[:, obs_dim] == 0)
+            assert torch.all(head_bias.grad[:, obs_dim * 2 + 1] == 0)
+            if clip_lv:
+                assert torch.all(dynamics.min_lv.grad[obs_dim] == 0)
+                assert torch.all(dynamics.max_lv.grad[obs_dim] == 0)
     
     def test_ensemble_parsing():
         def ensemble_equal(m1, m2):
@@ -677,6 +700,16 @@ if __name__ == "__main__":
         set_ensemble_params(ensemble_2, params_list)
         assert ensemble_equal(ensemble_1, ensemble_2)
     
+    def test_get_random_index():
+        idx = get_random_index(batch_size, ensemble_dim, bootstrap=True)
+        obs_batch = obs[idx]
+
+        assert all([len(np.unique(idx[:, i])) == batch_size for i in range(ensemble_dim)])
+        assert np.any(idx[:, 0] != idx[:, 1]) # at least one is not the same
+
+        for i in range(ensemble_dim):
+            assert torch.isclose(obs_batch[:, i], obs[idx[:, i]]).all()
+
     # start testing
     test_soft_clamp()
     print("soft_clamp passed")
@@ -716,6 +749,9 @@ if __name__ == "__main__":
         pred_rwd=True
     )
     print("test_ensemble passed")
+
+    test_get_random_index()
+    print("test_get_random_index passed")
 
     test_ensemble_parsing()
     print("test_ensemble_parsing passed")
