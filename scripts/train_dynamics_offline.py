@@ -9,7 +9,7 @@ import torch.nn as nn
 
 from src.utils.data import load_data
 from src.agents.dynamics import EnsembleDynamics, train_ensemble
-from src.utils.logging import SaveCallback
+from src.utils.logger import SaveCallback
 
 def parse_args():
     bool_ = lambda x: x if isinstance(x, bool) else x == "True"
@@ -41,6 +41,8 @@ def parse_args():
     parser.add_argument("--decay", type=list_, default=[0.000025, 0.00005, 0.000075, 0.000075, 0.0001], 
         help="weight decay for each layer, default=[0.000025, 0.00005, 0.000075, 0.000075, 0.0001]")
     parser.add_argument("--grad_clip", type=float, default=1000., help="gradient clipping, default=1000.")
+    parser.add_argument("--bootstrap", type=bool_, default=True, 
+        help="whether to use different minibatch ordering for each ensemble member, default=True")
     parser.add_argument("--epochs", type=int, default=100, help="number of reward training epochs, default=10")
     parser.add_argument("--max_epochs_since_update", type=int, default=5, help="early stopping condition, default=5")
     parser.add_argument("--cp_every", type=int, default=10, help="checkpoint interval, default=10")
@@ -133,6 +135,7 @@ def main(arglist):
         arglist["eval_ratio"], 
         arglist["batch_size"], 
         arglist["epochs"], 
+        bootstrap=arglist["bootstrap"],
         grad_clip=arglist["grad_clip"], 
         update_stats=True,
         update_elites=True,

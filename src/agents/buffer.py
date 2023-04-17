@@ -58,13 +58,13 @@ class ReplayBuffer:
 
     def push(self, obs, act, rwd, next_obs, done):
         """ Temporarily store """
-        self.obs_batch = np.concatenate([self.obs_batch, obs.reshape(1, -1)], axis=0)
-        self.act_batch = np.concatenate([self.act_batch, act.reshape(1, -1)], axis=0)
-        self.rwd_batch = np.concatenate([self.rwd_batch, rwd.reshape(1, -1)], axis=0)
-        self.next_obs_batch = np.concatenate([self.next_obs_batch, next_obs.reshape(1, -1)], axis=0)
-        self.done_batch = np.concatenate([self.done_batch, done.reshape(1, -1)], axis=0)
+        self.obs_batch = np.concatenate([self.obs_batch, obs.reshape(-1, self.obs_dim)], axis=0)
+        self.act_batch = np.concatenate([self.act_batch, act.reshape(-1, self.act_dim)], axis=0)
+        self.rwd_batch = np.concatenate([self.rwd_batch, rwd.reshape(-1, 1)], axis=0)
+        self.next_obs_batch = np.concatenate([self.next_obs_batch, next_obs.reshape(-1, self.obs_dim)], axis=0)
+        self.done_batch = np.concatenate([self.done_batch, done.reshape(-1, 1)], axis=0)
 
-    def push_batch(self, obs=None, act=None, rwd=None, next_obs=None, done=None):
+    def push_batch(self, obs=None, act=None, rwd=None, next_obs=None, done=None, update_stats=True):
         assert (
             all([obs is None, act is None, rwd is None, next_obs is None, done is None]) or 
             all([obs is not None, act is not None, rwd is not None, next_obs is not None, done is not None])
@@ -82,7 +82,9 @@ class ReplayBuffer:
             self.rwd_batch = np.empty(shape=(0, 1))
             self.next_obs_batch = np.empty(shape=(0, self.obs_dim))
             self.done_batch = np.empty(shape=(0, 1))
-
+        
+        assert done.dtype != bool
+        
         batch_size = len(obs)
 
         self.obs = np.concatenate([self.obs, obs.reshape(-1, self.obs_dim)], axis=0)
@@ -90,8 +92,9 @@ class ReplayBuffer:
         self.rwd = np.concatenate([self.rwd, rwd.reshape(-1, 1)], axis=0)
         self.next_obs = np.concatenate([self.next_obs, next_obs.reshape(-1, self.obs_dim)], axis=0)
         self.done = np.concatenate([self.done, done.reshape(-1, 1)], axis=0)
-
-        self.update_stats(obs, rwd)
+        
+        if update_stats:
+            self.update_stats(obs, rwd)
         self.size += batch_size
 
         if self.size > self.max_size:
@@ -117,9 +120,6 @@ class ReplayBuffer:
             done=self.done[idx],
         )
         return {k: torch.from_numpy(v).to(torch.float32) for k, v in batch.items()}
-    
-    def sample_episodes(self, batch_size):
-        return 
 
     def update_stats(self, obs, rwd):
         """ Update observation and reward moving mean and variance """

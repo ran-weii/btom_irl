@@ -18,9 +18,10 @@ python train_dynamics_offline.py \
 --lr 3e-4 \
 --decay "0.000025, 0.00005, 0.000075, 0.000075, 0.0001" \
 --grad_clip 1000. \
+--bootstrap True \
 --epochs 500 \
 --max_epochs_since_update 10 \
 --cp_every 10 \
 --verbose 1 \
---save True \
+--save False \
 --seed 0
