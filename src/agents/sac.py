@@ -11,7 +11,8 @@ import torch.distributions.transforms as torch_transform
 # model imports
 from src.agents.nn_models import MLP, DoubleQNetwork
 from src.agents.buffer import ReplayBuffer
-from src.utils.logging import Logger
+from src.utils.evaluate import evaluate
+from src.utils.logger import Logger
 
 class TanhTransform(torch_transform.Transform):
     """ Adapted from Pytorch implementation with clipping """
@@ -123,7 +124,9 @@ class SAC(nn.Module):
         
         self.replay_buffer = ReplayBuffer(obs_dim, act_dim, buffer_size, momentum=0.99)
         
-        self.plot_keys = ["eval_eps_return", "eval_eps_len", "critic_loss", "actor_loss", "beta"]
+        self.plot_keys = [
+            "eval_eps_return_mean", "eval_eps_len_mean", "critic_loss", "actor_loss", "beta"
+        ]
     
     def sample_action(self, obs, sample_mean=False):
         mu, lv = torch.chunk(self.actor.forward(obs), 2, dim=-1)
@@ -243,36 +246,6 @@ class SAC(nn.Module):
         self.critic.eval()
         return stats
     
-    def rollout(self, env, max_steps, sample_mean=False):
-        obs = env.reset()[0]
-
-        data = {"obs": [], "act": [], "next_obs": [], "rwd": [], "done": []}
-        for t in range(max_steps):
-            with torch.no_grad():
-                act = self.choose_action(
-                    torch.from_numpy(obs).to(torch.float32).to(self.device),
-                    sample_mean=sample_mean
-                ).cpu().numpy()
-            next_obs, rwd, terminated, _, _ = env.step(act)
-            
-            data["obs"].append(obs)
-            data["act"].append(act)
-            data["next_obs"].append(next_obs)
-            data["rwd"].append(rwd)
-            data["done"].append(terminated)
-
-            if terminated:
-                break
-            
-            obs = next_obs
-
-        data["obs"] = torch.from_numpy(np.stack(data["obs"])).to(torch.float32)
-        data["act"] = torch.from_numpy(np.stack(data["act"])).to(torch.float32)
-        data["next_obs"] = torch.from_numpy(np.stack(data["next_obs"])).to(torch.float32)
-        data["rwd"] = torch.from_numpy(np.stack(data["rwd"])).to(torch.float32)
-        data["done"] = torch.from_numpy(np.stack(data["done"])).to(torch.float32)
-        return data
-    
     def train_policy_epoch(self, rwd_fn=None, logger=None):
         policy_stats_epoch = []
         for _ in range(self.steps):
@@ -325,7 +298,7 @@ class SAC(nn.Module):
                 # start new episode
                 obs, eps_return, eps_len = env.reset()[0], 0, 0
 
-            # train model
+            # train policy
             if (t + 1) > update_after and (t - update_after + 1) % update_every == 0:
                 policy_stats_epoch = self.train_policy_epoch(rwd_fn=rwd_fn, logger=logger)
                 if (t + 1) % verbose == 0:
@@ -338,16 +311,7 @@ class SAC(nn.Module):
 
                 # evaluate episodes
                 if num_eval_eps > 0:
-                    eval_eps = []
-                    eval_returns = []
-                    eval_lens = []
-                    for i in range(num_eval_eps):
-                        eval_eps.append(self.rollout(eval_env, max_steps, sample_mean=eval_deterministic))
-                        eval_returns.append(sum(eval_eps[-1]["rwd"]))
-                        eval_lens.append(sum(1 - eval_eps[-1]["done"]))
-
-                        logger.push({"eval_eps_return": sum(eval_eps[-1]["rwd"])})
-                        logger.push({"eval_eps_len": sum(1 - eval_eps[-1]["done"])})
+                    evaluate(eval_env, self, num_eval_eps, max_steps, eval_deterministic, logger)
 
                 logger.push({"epoch": epoch + 1})
                 logger.push({"time": time.time() - start_time})

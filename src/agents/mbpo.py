@@ -6,7 +6,15 @@ import torch
 from src.agents.sac import SAC
 from src.agents.dynamics import train_ensemble
 from src.agents.buffer import ReplayBuffer
-from src.utils.logging import Logger
+from src.utils.evaluate import evaluate
+from src.utils.logger import Logger
+
+def compute_linear_scale(min_val, max_val, min_step, max_step, t):
+    """ Linearly increate value based on step """
+    ratio = (t - min_step) / (max_step - min_step)
+    ratio = max(0, min(ratio, 1))
+    val = min_val + ratio * (max_val - min_val)
+    return val
 
 class MBPO(SAC):
     """ Model-based policy optimization """
@@ -33,6 +41,7 @@ class MBPO(SAC):
         rollout_min_epoch=20, 
         rollout_max_epoch=100,
         model_retain_epochs=5,
+        model_train_samples=100000,
         real_ratio=0.05, 
         eval_ratio=0.2, 
         m_steps=100, 
@@ -66,6 +75,7 @@ class MBPO(SAC):
             rollout_min_epoch (int, optional): epoch to start increasing rollout length. Default=20
             rollout_max_epoch (int, optional): epoch to stop increasing rollout length. Default=100
             model_retain_epochs (int, optional): number of epochs to keep model samples. Default=5
+            model_train_samples (int, optional): maximum number of samples for model training. Default=1e5
             real_ratio (float, optional): ratio of real samples for policy training. Default=0.05
             eval_ratio (float, optional): ratio of real samples for model evaluation. Default=0.2
             m_steps (int, optional): model update steps per training step. Default=100
@@ -89,6 +99,7 @@ class MBPO(SAC):
         self.rollout_min_epoch = rollout_min_epoch # used to calculate rollout steps
         self.rollout_max_epoch = rollout_max_epoch # used to calculate rollout steps
         self.model_retain_epochs = model_retain_epochs
+        self.model_train_samples = model_train_samples
         self.real_ratio = real_ratio
         self.eval_ratio = eval_ratio
         self.m_steps = m_steps
@@ -103,28 +114,13 @@ class MBPO(SAC):
         self.real_buffer = ReplayBuffer(obs_dim, act_dim, buffer_size, momentum=0.)
 
         self.plot_keys = [
-            "eval_eps_return", "eval_eps_len", "critic_loss", 
-            "actor_loss", "beta", "rwd_mae", "obs_mae"
+            "eval_eps_return_mean", "eval_eps_len_mean", "critic_loss", 
+            "actor_loss", "beta", "mae"
         ]
     
-    def update_stats(self):
-        obs_mean = self.real_buffer.obs_mean
-        obs_variance = self.real_buffer.obs_variance
-        rwd_mean = self.real_buffer.rwd_mean
-        rwd_variance = self.real_buffer.rwd_variance
-
-        self.dynamics.update_stats(obs_mean, obs_variance, rwd_mean, rwd_variance)
-    
-    def train_dynamics_epoch(
-        self, steps, update_stats, max_epochs_since_update=5, verbose=10, logger=None
-        ):
-        data = self.real_buffer.sample(self.real_buffer.size)
-        data = [
-            data["obs"].numpy(),
-            data["act"].numpy(),
-            data["rwd"].numpy(),
-            data["next_obs"].numpy(),
-        ]
+    def train_dynamics_epoch(self, steps, max_epochs_since_update=5, logger=None):
+        data = self.real_buffer.sample(self.model_train_samples)
+        
         train_logger = train_ensemble(
             data, 
             self, 
@@ -132,16 +128,14 @@ class MBPO(SAC):
             eval_ratio=self.eval_ratio, 
             batch_size=self.batch_size, 
             epochs=steps, 
+            bootstrap=True,
             grad_clip=self.grad_clip, 
-            update_stats=update_stats,
             update_elites=True,
             max_epoch_since_update=max_epochs_since_update,
-            verbose=verbose, 
         )
         stats = {
             "obs_loss": train_logger.history[-1]["loss"],
-            "obs_mae": train_logger.history[-1]["obs_mae"],
-            "rwd_mae": train_logger.history[-1]["rwd_mae"],
+            "mae": train_logger.history[-1]["mae"],
         }
         if logger is not None:
             logger.push(stats)
@@ -242,14 +236,23 @@ class MBPO(SAC):
         )
     
     def compute_rollout_steps(self, epoch):
-        """ Linearly increate rollout steps based on epoch """
-        ratio = (epoch - self.rollout_min_epoch) / (self.rollout_max_epoch - self.rollout_min_epoch)
-        rollout_steps = min(
-            self.rollout_max_steps, max(
-                self.rollout_min_steps, self.rollout_min_steps + ratio * (self.rollout_max_steps - self.rollout_min_steps)
-            )
+        """ Linearly increase rollout steps based on epoch """
+        rollout_steps = compute_linear_scale(
+            self.rollout_min_steps, 
+            self.rollout_max_steps, 
+            self.rollout_min_epoch, 
+            self.rollout_max_epoch,
+            epoch
         )
         return int(rollout_steps)
+    
+    def reallocate_buffer_size(self, rollout_steps, steps_per_epoch, sample_model_every):
+        rollouts_per_epoch = self.rollout_batch_size * steps_per_epoch / sample_model_every
+        model_steps_per_epoch = rollouts_per_epoch * rollout_steps
+        buffer_size = min(
+            self.buffer_size, int(self.model_retain_epochs * model_steps_per_epoch)
+        )
+        return buffer_size
 
     def train_policy(
         self, env, eval_env, max_steps, epochs, steps_per_epoch, update_after, 
@@ -262,6 +265,7 @@ class MBPO(SAC):
         start_time = time.time()
         
         epoch = 0
+        ready_to_train = False
         obs, eps_return, eps_len = env.reset()[0], 0, 0
         for t in range(total_steps):
             if (t + 1) < update_after:
@@ -291,23 +295,26 @@ class MBPO(SAC):
                 # start new episode
                 obs, eps_return, eps_len = env.reset()[0], 0, 0
 
+            # train policy
+            if ready_to_train and (t - update_after + 1) % update_policy_every == 0:
+                policy_stats_epoch = self.train_policy_epoch(logger=logger)
+                if (t + 1) % verbose == 0:
+                    round_loss_dict = {k: round(v, 3) for k, v in policy_stats_epoch.items()}
+                    print(f"e: {epoch + 1}, t policy: {t + 1}, {round_loss_dict}")
+
             # train model
             if (t + 1) >= update_after and (t - update_after + 1) % update_model_every == 0:
+                ready_to_train = (t + 1) >= update_after
                 model_stats_epoch = self.train_dynamics_epoch(
                     self.m_steps, 
-                    update_stats=self.norm_obs,
                     max_epochs_since_update=5, 
-                    verbose=self.m_steps + 1, 
                     logger=logger
                 )
-                if verbose:
-                    round_loss_dict = {k: round(v, 3) for k, v in model_stats_epoch.items()}
-                    print(f"e: {epoch + 1}, t model: {t + 1}, {round_loss_dict}")
                 
                 # generate imagined data
                 rollout_steps = self.compute_rollout_steps(epoch + 1)
-                self.replay_buffer.max_size = min(
-                    self.buffer_size, int(self.model_retain_epochs * self.rollout_batch_size * rollout_steps)
+                self.replay_buffer.max_size = self.reallocate_buffer_size(
+                    rollout_steps, steps_per_epoch, update_model_every
                 )
                 self.sample_imagined_data(
                     self.replay_buffer, self.rollout_batch_size, rollout_steps, self.rollout_deterministic, mix=False
@@ -316,29 +323,13 @@ class MBPO(SAC):
                     rollout_steps, self.real_buffer.size, self.replay_buffer.size
                 ))
 
-            # train policy
-            if (t + 1) > update_after and (t - update_after + 1) % update_policy_every == 0:
-                policy_stats_epoch = self.train_policy_epoch(logger=logger)
-                if (t + 1) % verbose == 0:
-                    round_loss_dict = {k: round(v, 3) for k, v in policy_stats_epoch.items()}
-                    print(f"e: {epoch + 1}, t policy: {t + 1}, {round_loss_dict}")
-
             # end of epoch handeling
             if (t + 1) > update_after and (t - update_after + 1) % steps_per_epoch == 0:
                 epoch = (t - update_after + 1) // steps_per_epoch
 
                 # evaluate episodes
                 if num_eval_eps > 0:
-                    eval_eps = []
-                    eval_returns = []
-                    eval_lens = []
-                    for i in range(num_eval_eps):
-                        eval_eps.append(self.rollout(eval_env, max_steps, sample_mean=eval_deterministic))
-                        eval_returns.append(sum(eval_eps[-1]["rwd"]))
-                        eval_lens.append(sum(1 - eval_eps[-1]["done"]))
-
-                        logger.push({"eval_eps_return": sum(eval_eps[-1]["rwd"])})
-                        logger.push({"eval_eps_len": sum(1 - eval_eps[-1]["done"])})
+                    evaluate(eval_env, self, num_eval_eps, max_steps, eval_deterministic, logger)
 
                 logger.push({"epoch": epoch + 1})
                 logger.push({"time": time.time() - start_time})

@@ -1,0 +1,33 @@
+algo: sac
+exp_path: ../../exp/mujoco/rl
+cp_path: none
+
+# policy args
+hidden_dim: 256
+num_hidden: 2 
+activation: relu
+gamma: 0.99
+beta: 1.
+polyak: 0.995
+tune_beta: True
+
+# training args
+buffer_size: 1000000
+batch_size: 256
+steps: 1
+lr_a: 3.e-4
+lr_c: 3.e-4
+grad_clip: 100.
+
+# rollout args
+epochs: 1000
+max_steps: 1000
+steps_per_epoch: 1000
+update_after: 2000
+update_every: 1
+cp_every: 10
+cp_intermediate: False
+num_eval_eps: 10
+eval_deterministic: True
+verbose: 100
+render: False

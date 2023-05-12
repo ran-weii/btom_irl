@@ -1,0 +1,57 @@
+algo: mbpo
+exp_path: ../../exp/mujoco/rl
+cp_path: none
+
+# dynamics args
+ensemble_dim: 7
+topk: 5
+m_hidden_dim: 200
+m_num_hidden: 3
+m_activation: silu
+residual: True
+min_std: 0.04
+max_std: 1.6
+decay: [0.000025, 0.00005, 0.000075, 0.000075, 0.0001]
+
+# policy args
+a_hidden_dim: 256
+a_num_hidden: 2
+a_activation: relu
+gamma: 0.99
+beta: 1.
+polyak: 0.995
+tune_beta: True
+
+# training args
+buffer_size: 1000000
+batch_size: 256
+rollout_batch_size: 100000
+rollout_deterministic: False
+rollout_min_steps: 1
+rollout_max_steps: 15
+rollout_min_epoch: 20
+rollout_max_epoch: 100
+model_retain_epochs: 1
+model_train_samples: 100000
+real_ratio: 0.05
+eval_ratio: 0.2
+m_steps: 20
+a_steps: 20
+lr_a: 0.0003
+lr_c: 0.0003
+lr_m: 0.001
+grad_clip: 1000.
+
+# rollout args
+epochs: 2
+max_steps: 1000
+steps_per_epoch: 1000
+update_after: 5000
+update_model_every: 250
+update_policy_every: 1
+cp_every: 10
+cp_intermediate: False
+num_eval_eps: 5
+eval_deterministic: True
+verbose: 50
+render: False

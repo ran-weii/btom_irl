@@ -1,6 +1,6 @@
 import argparse
 import os
-import glob
+import yaml
 import mujoco_py
 import gymnasium as gym
 import numpy as np
@@ -11,14 +11,17 @@ import torch
 from src.agents.dynamics import EnsembleDynamics
 from src.agents.mbpo import MBPO
 from src.env.gym_wrapper import get_termination_fn
-from src.utils.logging import SaveCallback
+from src.utils.logger import SaveCallback, load_checkpoint
 
 def parse_args():
     bool_ = lambda x: x if isinstance(x, bool) else x == "True"
     list_ = lambda x: [float(i.replace(" ", "")) for i in x.split(",")]
     
     parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--algo", type=str, default="mbpo")
+    parser.add_argument("--base_yml_path", type=str, default="../../config/rl/mbpo/base.yml")
+    parser.add_argument("--yml_path", type=str, default="../../config/rl/mbpo/hopper.yml")
     parser.add_argument("--exp_path", type=str, default="../../exp/mujoco/rl")
     parser.add_argument("--cp_path", type=str, default="none", help="checkpoint path, default=none")
     # dynamics args
@@ -27,7 +30,6 @@ def parse_args():
     parser.add_argument("--m_hidden_dim", type=int, default=200, help="dynamics neural network hidden dims, default=200")
     parser.add_argument("--m_num_hidden", type=int, default=2, help="dynamics number of hidden layers, default=2")
     parser.add_argument("--m_activation", type=str, default="relu", help="dynamics neural network activation, default=relu")
-    parser.add_argument("--clip_lv", type=bool_, default=True, help="whether to clip observation variance, default=True")
     parser.add_argument("--residual", type=bool_, default=False, help="whether to predict observation residual, default=False")
     parser.add_argument("--min_std", type=float, default=1e-5, help="dynamics minimum prediction std, default=1e-5")
     parser.add_argument("--max_std", type=float, default=1.6, help="dynamics maximum prediction std, default=1.6")
@@ -52,6 +54,7 @@ def parse_args():
     parser.add_argument("--rollout_min_epoch", type=int, default=20, help="epoch to start increasing rollout steps, default=20")
     parser.add_argument("--rollout_max_epoch", type=int, default=100, help="epoch to stop increasing rollout steps, default=100")
     parser.add_argument("--model_retain_epochs", type=int, default=1, help="number of epochs to retain model samples, default=1")
+    parser.add_argument("--model_train_samples", type=int, default=100000, help="maximum number of samples for model training, default=1e5")
     parser.add_argument("--real_ratio", type=float, default=0.05, help="ratio of real samples for policy training, default=0.05")
     parser.add_argument("--eval_ratio", type=float, default=0.2, help="ratio of real samples for model evaluation, default=0.2")
     parser.add_argument("--m_steps", type=int, default=50, help="model training steps per update, default=50")
@@ -69,15 +72,25 @@ def parse_args():
     parser.add_argument("--update_model_every", type=int, default=250)
     parser.add_argument("--update_policy_every", type=int, default=50)
     parser.add_argument("--cp_every", type=int, default=10, help="checkpoint interval, default=10")
+    parser.add_argument("--cp_intermediate", type=bool, default=False, help="whether to save intermediate checkpoints, default=False")
     parser.add_argument("--num_eval_eps", type=int, default=5, help="number of evaluation episodes, default=5")
     parser.add_argument("--eval_deterministic", type=bool_, default=True, help="whether to evaluate deterministically, default=True")
     parser.add_argument("--verbose", type=int, default=10, help="verbose frequency, default=10")
     parser.add_argument("--render", type=bool_, default=False)
     parser.add_argument("--save", type=bool_, default=True)
-    parser.add_argument("--seed", type=int, default=0)
-    arglist = parser.parse_args()
-
     arglist = vars(parser.parse_args())
+
+    if arglist["base_yml_path"] != "none":
+        print("loaded base config:", arglist["base_yml_path"])
+        with open(arglist["base_yml_path"], "r") as f:
+            base_yml_args = yaml.safe_load(f)
+        arglist.update(base_yml_args)
+
+    if arglist["yml_path"] != "none":
+        print("loaded task config:", arglist["yml_path"])
+        with open(arglist["yml_path"], "r") as f:
+            yml_args = yaml.safe_load(f)
+        arglist.update(yml_args)
     return arglist
 
 def main(arglist):
@@ -111,7 +124,6 @@ def main(arglist):
         num_hidden=arglist["m_num_hidden"],
         activation=arglist["m_activation"],
         decay=arglist["decay"],
-        clip_lv=arglist["clip_lv"],
         residual=arglist["residual"],
         termination_fn=termination_fn,
         min_std=arglist["min_std"],
@@ -140,6 +152,7 @@ def main(arglist):
         rollout_min_epoch=arglist["rollout_min_epoch"], 
         rollout_max_epoch=arglist["rollout_max_epoch"], 
         model_retain_epochs=arglist["model_retain_epochs"],
+        model_train_samples=arglist["model_train_samples"],
         real_ratio=arglist["real_ratio"], 
         eval_ratio=arglist["eval_ratio"], 
         m_steps=arglist["m_steps"], 
@@ -156,27 +169,15 @@ def main(arglist):
     # load checkpoint
     cp_history = None
     if arglist["cp_path"] != "none":
-        cp_path = os.path.join(arglist["exp_path"], arglist["env_name"], "mbpo", arglist["cp_path"])
-        
-        # load state dict
-        cp_model_path = glob.glob(os.path.join(cp_path, "models/*.pt"))
-        cp_model_path.sort(key=lambda x: int(os.path.basename(x).replace(".pt", "").split("_")[-1]))
-        
-        state_dict = torch.load(cp_model_path[-1], map_location=device)
-        agent.load_state_dict(state_dict["model_state_dict"], strict=False)
-        for optimizer_name, optimizer_state_dict in state_dict["optimizer_state_dict"].items():
-            agent.optimizers[optimizer_name].load_state_dict(optimizer_state_dict)
-
-        # load history
-        cp_history = pd.read_csv(os.path.join(cp_path, "history.csv"))
-        print(f"loaded checkpoint from {cp_path}\n")
+        cp_path = os.path.join(arglist["exp_path"], arglist["algo"], arglist["env_name"], arglist["cp_path"])
+        agent, cp_history = load_checkpoint(cp_path, agent, device)
     
     print(agent)
     
     # init save callback
     callback = None
     if arglist["save"]:
-        save_path = os.path.join(arglist["exp_path"], arglist["env_name"], arglist["algo"])
+        save_path = os.path.join(arglist["exp_path"], arglist["algo"], arglist["env_name"])
         callback = SaveCallback(arglist, save_path, plot_keys, cp_history)
     
     # training loop

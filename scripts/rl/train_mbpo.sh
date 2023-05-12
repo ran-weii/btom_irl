@@ -1,52 +1,5 @@
 #! /bin/bash
 python train_mbpo.py \
---cp_path "none" \
---ensemble_dim 7 \
---topk 5 \
---m_hidden_dim 200 \
---m_num_hidden 2 \
---m_activation relu \
---clip_lv True \
---residual False \
---min_std 0.04 \
---max_std 1.6 \
---norm_obs True \
---decay "0.000025, 0.00005, 0.000075, 0.0001" \
---a_hidden_dim 200 \
---a_num_hidden 2 \
---a_activation relu \
---gamma 0.99 \
---beta 0.2 \
---polyak 0.995 \
---tune_beta False \
---buffer_size 1000000 \
---batch_size 200 \
---rollout_batch_size 50000 \
---rollout_deterministic False \
---rollout_min_steps 1 \
---rollout_max_steps 10 \
---rollout_min_epoch 20 \
---rollout_max_epoch 150 \
---model_retain_epochs 4 \
---real_ratio 0.05 \
---eval_ratio 0.2 \
---m_steps 20 \
---a_steps 20 \
---lr_a 0.001 \
---lr_c 0.001 \
---lr_m 0.001 \
---grad_clip 100. \
---env_name "Hopper-v4" \
---epochs 1000 \
---max_steps 1000 \
---steps_per_epoch 1000 \
---update_after 5000 \
---update_model_every 250 \
---update_policy_every 10 \
---cp_every 10 \
---num_eval_eps 5 \
---eval_deterministic True \
---verbose 50 \
---render False \
---save False \
---seed 0
+--yml_path ../../config/rl/mbpo/hopper-v2.yml \
+--seed 0 \
+--save True

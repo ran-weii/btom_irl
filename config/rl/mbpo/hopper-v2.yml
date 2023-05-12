@@ -1,0 +1,4 @@
+env_name: Hopper-v2
+
+rollout_max_steps: 15
+a_steps: 20

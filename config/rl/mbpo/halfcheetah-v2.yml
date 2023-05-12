@@ -1,0 +1,4 @@
+env_name: HalfCheetah-v2
+
+rollout_max_steps: 1
+a_steps: 20

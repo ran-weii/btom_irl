@@ -1,6 +1,6 @@
 import argparse
 import os
-import glob
+import yaml
 import mujoco_py
 import gymnasium as gym
 import numpy as np
@@ -8,13 +8,15 @@ import pandas as pd
 import torch 
 
 from src.agents.sac import SAC
-from src.utils.logging import SaveCallback
+from src.utils.logger import SaveCallback, load_checkpoint
 
 def parse_args():
     bool_ = lambda x: x if isinstance(x, bool) else x == "True"
     
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--algo", type=str, default="sac")
+    parser.add_argument("--yml_path", type=str, default="../../config/rl/sac/base.yml")
     parser.add_argument("--exp_path", type=str, default="../../exp/mujoco/rl")
     parser.add_argument("--cp_path", type=str, default="none", help="checkpoint path, default=none")
     # algo args
@@ -40,14 +42,19 @@ def parse_args():
     parser.add_argument("--update_after", type=int, default=2000)
     parser.add_argument("--update_every", type=int, default=50)
     parser.add_argument("--cp_every", type=int, default=10, help="checkpoint interval, default=10")
+    parser.add_argument("--cp_intermediate", type=bool, default=False, help="whether to save intermediate checkpoints, default=False")
     parser.add_argument("--num_eval_eps", type=int, default=5, help="number of evaluation episodes, default=5")
     parser.add_argument("--eval_deterministic", type=bool_, default=True, help="whether to evaluate deterministically, default=True")
     parser.add_argument("--verbose", type=int, default=50, help="verbose interval, default=50")
     parser.add_argument("--render", type=bool_, default=False)
     parser.add_argument("--save", type=bool_, default=True)
-    arglist = parser.parse_args()
-
     arglist = vars(parser.parse_args())
+
+    if arglist["yml_path"] != "none":
+        print("loaded base config:", arglist["yml_path"])
+        with open(arglist["yml_path"], "r") as f:
+            yml_args = yaml.safe_load(f)
+        arglist.update(yml_args)
     return arglist
 
 def main(arglist):
@@ -94,27 +101,15 @@ def main(arglist):
     # load checkpoint
     cp_history = None
     if arglist["cp_path"] != "none":
-        cp_path = os.path.join(arglist["exp_path"], arglist["env_name"], "sac", arglist["cp_path"])
-        
-        # load state dict
-        cp_model_path = glob.glob(os.path.join(cp_path, "models/*.pt"))
-        cp_model_path.sort(key=lambda x: int(os.path.basename(x).replace(".pt", "").split("_")[-1]))
-        
-        state_dict = torch.load(cp_model_path[-1], map_location=device)
-        agent.load_state_dict(state_dict["model_state_dict"], strict=False)
-        for optimizer_name, optimizer_state_dict in state_dict["optimizer_state_dict"].items():
-            agent.optimizers[optimizer_name].load_state_dict(optimizer_state_dict)
-
-        # load history
-        cp_history = pd.read_csv(os.path.join(cp_path, "history.csv"))
-        print(f"loaded checkpoint from {cp_path}\n")
+        cp_path = os.path.join(arglist["exp_path"], arglist["algo"], arglist["env_name"], arglist["cp_path"])
+        agent, cp_history = load_checkpoint(cp_path, agent, device)
     
     print(agent)
     
     # init save callback
     callback = None
     if arglist["save"]:
-        save_path = os.path.join(arglist["exp_path"], arglist["env_name"], "sac")
+        save_path = os.path.join(arglist["exp_path"], arglist["algo"], arglist["env_name"])
         callback = SaveCallback(arglist, save_path, plot_keys, cp_history)
     
     # training loop
