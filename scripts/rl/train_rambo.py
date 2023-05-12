@@ -1,7 +1,6 @@
 import argparse
 import os
-import glob
-import pickle
+import yaml
 import mujoco_py
 import gymnasium as gym
 import numpy as np
@@ -9,27 +8,30 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import torch 
 
-from src.utils.data import load_data
+from src.utils.data import load_d4rl_transitions
 from src.agents.dynamics import EnsembleDynamics, train_ensemble
 from src.agents.rambo import RAMBO
 from src.env.gym_wrapper import GymEnv, get_termination_fn
-from src.utils.logging import SaveCallback
+from src.utils.logger import SaveCallback, load_checkpoint
 
 def parse_args():
     bool_ = lambda x: x if isinstance(x, bool) else x == "True"
     list_ = lambda x: [float(i.replace(" ", "")) for i in x.split(",")]
     
     parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--algo", type=str, default="rambo")
+    parser.add_argument("--base_yml_path", type=str, default="../../config/rl/rambo/base.yml")
+    parser.add_argument("--yml_path", type=str, default="../../config/rl/rambo/hopper-medium-expert-v2.yml")
     parser.add_argument("--exp_path", type=str, default="../../exp/mujoco/rl")
     parser.add_argument("--data_path", type=str, default="../../data/d4rl/")
-    parser.add_argument("--filename", type=str, default="hopper-expert-v2.p")
+    parser.add_argument("--data_name", type=str, default="hopper-medium-expert-v2")
     parser.add_argument("--cp_path", type=str, default="none", help="checkpoint path, default=none")
-    parser.add_argument("--dynamics_path", type=str, default="", 
+    parser.add_argument("--dynamics_path", type=str, default="none", 
         help="pretrained dynamics path, default=none")
     # data args
     parser.add_argument("--num_samples", type=int, default=2000000, help="number of training transitions, default=2000000")
-    parser.add_argument("--norm_obs", type=bool_, default=True, help="normalize observatins, default=True")
+    parser.add_argument("--norm_obs", type=bool_, default=True, help="normalize observations, default=True")
     parser.add_argument("--norm_rwd", type=bool_, default=False, help="normalize reward, default=False")
     # dynamics args
     parser.add_argument("--ensemble_dim", type=int, default=7, help="ensemble size, default=7")
@@ -37,17 +39,16 @@ def parse_args():
     parser.add_argument("--m_hidden_dim", type=int, default=200, help="dynamics neural network hidden dims, default=200")
     parser.add_argument("--m_num_hidden", type=int, default=3, help="dynamics number of hidden layers, default=3")
     parser.add_argument("--m_activation", type=str, default="silu", help="dynamics neural network activation, default=silu")
-    parser.add_argument("--clip_lv", type=bool_, default=True, help="whether to clip observation variance, default=True")
     parser.add_argument("--residual", type=bool_, default=True, help="whether to predict observation residual, default=True")
     parser.add_argument("--min_std", type=float, default=0.04, help="dynamics minimum prediction std, default=0.04")
     parser.add_argument("--max_std", type=float, default=1.6, help="dynamics maximum prediction std, default=1.6")
     parser.add_argument("--obs_penalty", type=float, default=1., help="transition likelihood penalty, default=1.")
-    parser.add_argument("--adv_penalty", type=float, default=0.08, help="model advantage penalty, default=0.08")
-    parser.add_argument("--adv_clip_max", type=float, default=60., help="clip advantage max value, default=60.")
+    parser.add_argument("--adv_penalty", type=float, default=0.1, help="model advantage penalty, default=0.1")
+    parser.add_argument("--adv_rollout_steps", type=int, default=10, help="advantage rollout steps, default=10")
     parser.add_argument("--adv_action_deterministic", type=bool_, default=True, help="whether to use deterministic action in advantage, default=True")
     parser.add_argument("--adv_include_entropy", type=bool_, default=False, help="whether to include entropy in advantage, default=False")
+    parser.add_argument("--adv_clip_max", type=float, default=40., help="clip advantage max value, default=40.")
     parser.add_argument("--norm_advantage", type=bool_, default=True, help="whether to normalize advantage, default=True")
-    parser.add_argument("--update_critic_adv", type=bool_, default=False, help="whether to update critic during model training, default=False")
     parser.add_argument("--decay", type=list_, default=[0.000025, 0.00005, 0.000075, 0.000075, 0.0001], 
         help="weight decay for each layer, default=[0.000025, 0.00005, 0.000075, 0.000075, 0.0001]")
     # policy args
@@ -67,7 +68,7 @@ def parse_args():
     parser.add_argument("--rollout_max_steps", type=int, default=5, help="max dynamics rollout steps, default=5")
     parser.add_argument("--rollout_min_epoch", type=int, default=20, help="epoch to start increasing rollout steps, default=20")
     parser.add_argument("--rollout_max_epoch", type=int, default=100, help="epoch to stop increasing rollout steps, default=100")
-    parser.add_argument("--model_retain_epochs", type=int, default=4, help="number of epochs to retain model samples, default=4")
+    parser.add_argument("--model_retain_epochs", type=int, default=5, help="number of epochs to retain model samples, default=5")
     parser.add_argument("--real_ratio", type=float, default=0.5, help="ratio of real samples for policy training, default=0.5")
     parser.add_argument("--eval_ratio", type=float, default=0.2, help="ratio of real samples for model evaluation, default=0.2")
     parser.add_argument("--m_steps", type=int, default=1000, help="model training steps per update, default=1000")
@@ -79,6 +80,7 @@ def parse_args():
     # rollout args
     parser.add_argument("--env_name", type=str, default="Hopper-v4", help="environment name, default=Hopper-v4")
     parser.add_argument("--pretrain_steps", type=int, default=50, help="number of dynamics and reward pretraining steps, default=50")
+    parser.add_argument("--num_pretrain_samples", type=int, default=100000, help="number of dynamics and reward pretraining samples, default=1e5")
     parser.add_argument("--epochs", type=int, default=2000, help="number of training epochs, default=2000")
     parser.add_argument("--max_steps", type=int, default=1000, help="max steps per episode, default=1000")
     parser.add_argument("--steps_per_epoch", type=int, default=1000)
@@ -86,15 +88,25 @@ def parse_args():
     parser.add_argument("--update_model_every", type=int, default=1000)
     parser.add_argument("--update_policy_every", type=int, default=1)
     parser.add_argument("--cp_every", type=int, default=10, help="checkpoint interval, default=10")
+    parser.add_argument("--cp_intermediate", type=bool, default=False, help="whether to save intermediate checkpoints, default=False")
     parser.add_argument("--num_eval_eps", type=int, default=5, help="number of evaluation episodes, default=5")
     parser.add_argument("--eval_deterministic", type=bool_, default=True, help="whether to evaluate deterministically, default=True")
     parser.add_argument("--verbose", type=int, default=10, help="verbose frequency, default=10")
     parser.add_argument("--render", type=bool_, default=False)
     parser.add_argument("--save", type=bool_, default=True)
-    parser.add_argument("--seed", type=int, default=0)
-    arglist = parser.parse_args()
-
     arglist = vars(parser.parse_args())
+
+    if arglist["base_yml_path"] != "none":
+        print("loaded base config:", arglist["base_yml_path"])
+        with open(arglist["base_yml_path"], "r") as f:
+            base_yml_args = yaml.safe_load(f)
+        arglist.update(base_yml_args)
+
+    if arglist["yml_path"] != "none":
+        print("loaded task config:", arglist["yml_path"])
+        with open(arglist["yml_path"], "r") as f:
+            yml_args = yaml.safe_load(f)
+        arglist.update(yml_args)
     return arglist
 
 def main(arglist):
@@ -106,35 +118,15 @@ def main(arglist):
     print(f"device: {device}")
 
     # load data
-    filepath = os.path.join(arglist["data_path"], arglist["filename"])
-    obs, act, rwd, next_obs, terminated = load_data(filepath, arglist["num_samples"])
-    
-    # normalize data
-    obs_mean = 0.
-    obs_std = 1.
-    if arglist["norm_obs"]:
-        obs_mean = obs.mean(0)
-        obs_std = obs.std(0)
-        obs = (obs - obs_mean) / obs_std
-        next_obs = (next_obs - obs_mean) / obs_std
-    
-    rwd_mean = 0.
-    rwd_std = 1.
-    if arglist["norm_rwd"]:
-        rwd_mean = rwd.mean(0)
-        rwd_std = rwd.std(0)
-        rwd = (rwd - rwd_mean) / rwd_std
-    
-    print("processed data stats")
-    print("data size:", len(obs))
-    print("obs_mean:", obs.mean(0).round(2))
-    print("obs_std:", obs.std(0).round(2))
-    print("rwd_mean:", rwd.mean(0).round(2))
-    print("rwd_std:", rwd.std(0).round(2))
+    filepath = os.path.join(arglist["data_path"], arglist["data_name"] + ".p")
+    data, obs_mean, obs_std, rwd_mean, rwd_std = load_d4rl_transitions(
+        arglist["data_name"], filepath, arglist["num_samples"], shuffle=True,
+        norm_obs=arglist["norm_obs"], norm_rwd=arglist["norm_rwd"]
+    )
 
     # init model
-    obs_dim = obs.shape[-1]
-    act_dim = act.shape[-1]
+    obs_dim = data["obs"].shape[-1]
+    act_dim = data["act"].shape[-1]
     act_lim = torch.ones(act_dim)
     termination_fn = get_termination_fn(
         arglist["env_name"], 
@@ -152,7 +144,6 @@ def main(arglist):
         num_hidden=arglist["m_num_hidden"],
         activation=arglist["m_activation"],
         decay=arglist["decay"],
-        clip_lv=arglist["clip_lv"],
         residual=arglist["residual"],
         termination_fn=termination_fn,
         min_std=arglist["min_std"],
@@ -173,10 +164,10 @@ def main(arglist):
         tune_beta=arglist["tune_beta"],
         obs_penalty=arglist["obs_penalty"], 
         adv_penalty=arglist["adv_penalty"], 
-        adv_clip_max=arglist["adv_clip_max"],
+        adv_rollout_steps=arglist["adv_rollout_steps"],
         adv_include_entropy=arglist["adv_include_entropy"],
+        adv_clip_max=arglist["adv_clip_max"],
         norm_advantage=arglist["norm_advantage"],
-        update_critic_adv=arglist["update_critic_adv"],
         buffer_size=arglist["buffer_size"], 
         batch_size=arglist["batch_size"], 
         rollout_batch_size=arglist["rollout_batch_size"], 
@@ -200,46 +191,35 @@ def main(arglist):
     plot_keys = agent.plot_keys
 
     if arglist["dynamics_path"] != "none":
-        dynamics_state_dict = torch.load(os.path.join(arglist["dynamics_path"], "model.pt"), map_location=device)
+        dynamics_state_dict = torch.load(os.path.join(arglist["dynamics_path"], "models", "model.pt"), map_location=device)
         agent.load_state_dict(dynamics_state_dict["model_state_dict"], strict=False)
         print(f"dynamics loaded from: {arglist['dynamics_path']}")
     
     agent.real_buffer.push_batch(
-        obs, act, rwd, next_obs, terminated
+        data["obs"], 
+        data["act"], 
+        data["rwd"], 
+        data["next_obs"], 
+        data["done"]
     )
-    agent.update_stats()
     
     # load checkpoint
     cp_history = None
     if arglist["cp_path"] != "none":
-        cp_path = os.path.join(arglist["exp_path"], arglist["env_name"], "rambo", arglist["cp_path"])
-        
-        # load state dict
-        cp_model_path = glob.glob(os.path.join(cp_path, "models/*.pt"))
-        cp_model_path.sort(key=lambda x: int(os.path.basename(x).replace(".pt", "").split("_")[-1]))
-        
-        state_dict = torch.load(cp_model_path[-1], map_location=device)
-        agent.load_state_dict(state_dict["model_state_dict"], strict=False)
-        for optimizer_name, optimizer_state_dict in state_dict["optimizer_state_dict"].items():
-            agent.optimizers[optimizer_name].load_state_dict(optimizer_state_dict)
-
-        # load history
-        cp_history = pd.read_csv(os.path.join(cp_path, "history.csv"))
-        print(f"loaded checkpoint from {cp_path}\n")
+        cp_path = os.path.join(arglist["exp_path"], arglist["algo"], arglist["data_name"], arglist["cp_path"])
+        agent, cp_history = load_checkpoint(cp_path, agent, device)
     
     print(agent)
     print(f"real buffer size: {agent.real_buffer.size}")
     
     print("agent norm stats")
-    print(agent.dynamics.obs_mean.cpu().data.numpy().round(2))
-    print((agent.dynamics.obs_variance**0.5).cpu().data.numpy().round(2))
-    print(agent.dynamics.rwd_mean.cpu().data.numpy().round(2))
-    print((agent.dynamics.rwd_variance**0.5).cpu().data.numpy().round(2))
-    
+    print(agent.dynamics.scaler.mean)
+    print(agent.dynamics.scaler.variance**0.5)
+
     # init save callback
     callback = None
     if arglist["save"]:
-        save_path = os.path.join(arglist["exp_path"], arglist["env_name"], arglist["algo"])
+        save_path = os.path.join(arglist["exp_path"], arglist["algo"], arglist["data_name"])
         callback = SaveCallback(arglist, save_path, plot_keys, cp_history)
     
     # training loop
@@ -255,20 +235,22 @@ def main(arglist):
     eval_env.np_random = gym.utils.seeding.np_random(arglist["seed"])[0]
     
     print("\npretrain dynamics:", arglist["pretrain_steps"] > 0)
-    dynamics_pretrain_optimizer = torch.optim.Adam(agent.dynamics.parameters(), lr=arglist["lr_m"])
-    train_ensemble(
-        [obs, act, rwd, next_obs],
-        agent,
-        optimizer=dynamics_pretrain_optimizer,
-        eval_ratio=arglist["eval_ratio"],
-        batch_size=arglist["batch_size"],
-        epochs=arglist["pretrain_steps"],
-        grad_clip=arglist["grad_clip"],
-        update_stats=True,
-        update_elites=True,
-        max_epoch_since_update=10,
-        verbose=1,
-    )
+    if arglist["dynamics_path"] == "none" or arglist["pretrain_steps"] > 0:
+        data = agent.real_buffer.sample(arglist["num_pretrain_samples"])
+        dynamics_pretrain_optimizer = torch.optim.Adam(agent.dynamics.parameters(), lr=arglist["lr_m"])
+        train_ensemble(
+            data, 
+            agent,
+            optimizer=dynamics_pretrain_optimizer,
+            eval_ratio=arglist["eval_ratio"],
+            batch_size=arglist["batch_size"],
+            epochs=arglist["pretrain_steps"],
+            bootstrap=True,
+            grad_clip=arglist["grad_clip"],
+            update_elites=True,
+            max_epoch_since_update=10,
+            debug=True
+        )
     
     logger = agent.train_policy(
         eval_env, 
