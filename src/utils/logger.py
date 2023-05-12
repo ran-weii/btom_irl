@@ -1,4 +1,5 @@
 import os
+import glob
 import json
 import datetime
 import pprint
@@ -42,6 +43,21 @@ def plot_history(df_history, plot_keys, plot_std=True):
     plt.tight_layout()
     return fig, ax
 
+def load_checkpoint(cp_path, agent, device):
+    # load state dict
+    cp_model_path = glob.glob(os.path.join(cp_path, "models/*.pt"))
+    if len(cp_model_path) > 1:
+        cp_model_path.sort(key=lambda x: int(os.path.basename(x).replace(".pt", "").split("_")[-1]))
+
+    state_dict = torch.load(cp_model_path[-1], map_location=device)
+    agent.load_state_dict(state_dict["model_state_dict"], strict=False)
+    for optimizer_name, optimizer_state_dict in state_dict["optimizer_state_dict"].items():
+        agent.optimizers[optimizer_name].load_state_dict(optimizer_state_dict)
+
+    # load history
+    cp_history = pd.read_csv(os.path.join(cp_path, "history.csv"))
+    print(f"loaded checkpoint from {cp_path}\n")
+    return agent, cp_history
 
 class Logger():
     """ Stats logger """
@@ -56,7 +72,7 @@ class Logger():
                 self.epoch_dict[key] = []
             self.epoch_dict[key].append(val)
 
-    def log(self, std=True, min_max=False, silent=False):
+    def log(self, std=False, min_max=False, silent=False):
         stats = dict()
         for key, val in self.epoch_dict.items():
             if isinstance(val[0], np.ndarray) or len(val) > 1:
@@ -96,13 +112,15 @@ class SaveCallback:
         self.plot_keys = plot_keys
         self.cp_history = cp_history
         self.cp_every = arglist["cp_every"]
+        self.cp_intermediate = arglist["cp_intermediate"]
         self.iter = 0
     
     def __call__(self, model, df_history):
         self.iter += 1
         if self.iter % self.cp_every == 0:
             self.save_history(df_history)
-            self.save_checkpoint(model, os.path.join(self.model_path, f"model_{self.iter}.pt"))
+            model_name = f"model_{self.iter}.pt" if self.cp_intermediate else f"model.pt"
+            self.save_checkpoint(model, os.path.join(self.model_path, model_name))
     
     def save_history(self, df_history):
         if self.cp_history is not None:
@@ -120,7 +138,7 @@ class SaveCallback:
 
     def save_checkpoint(self, model, path=None):
         if path is None:
-            path = os.path.join(self.save_path, "model.pt")
+            path = os.path.join(self.model_path, "model.pt")
 
         model_state_dict = {k: v.cpu() for k, v in model.state_dict().items()}
         optimizer_state_dict = {

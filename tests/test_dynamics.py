@@ -15,7 +15,7 @@ def test_soft_clamp():
     assert _min < soft_clamp(x2, _min, _max) < _max
     assert _min < soft_clamp(x3, _min, _max) < _max
 
-def test_ensemble(clip_lv=False, residual=False, termination_fn=None, pred_rwd=False):
+def test_ensemble(residual=False, termination_fn=None, pred_rwd=False):
     dynamics = EnsembleDynamics(
         obs_dim,
         act_dim, 
@@ -26,64 +26,57 @@ def test_ensemble(clip_lv=False, residual=False, termination_fn=None, pred_rwd=F
         num_hidden,
         activation,
         decay=decay,
-        clip_lv=clip_lv,
         residual=residual,
         termination_fn=termination_fn,
         min_std=min_std,
         max_std=max_std
     )
+    
+    # synthetic data
+    inputs = torch.cat([obs, act], dim=-1)
+    targets = torch.cat([next_obs, rwd], dim=-1) if pred_rwd else next_obs
+    inputs_sep = torch.cat([obs_sep, act_sep], dim=-1)
+    targets_sep = torch.cat([next_obs_sep, rwd_sep], dim=-1) if pred_rwd else next_obs_sep
 
     # test internal variable shapes
     assert list(dynamics.topk_dist.shape) == [ensemble_dim]
-    assert list(dynamics.min_lv.shape) == [obs_dim + 1]
-    assert list(dynamics.max_lv.shape) == [obs_dim + 1]
-    assert list(dynamics.obs_mean.shape) == [obs_dim]
-    assert list(dynamics.obs_variance.shape) == [obs_dim]
-    assert list(dynamics.rwd_mean.shape) == [1]
-    assert list(dynamics.rwd_variance.shape) == [1]
+    assert list(dynamics.min_lv.shape) == [obs_dim + pred_rwd]
+    assert list(dynamics.max_lv.shape) == [obs_dim + pred_rwd]
     assert torch.isclose(dynamics.min_lv.exp() ** 0.5, min_std * torch.ones(1), atol=1e-5).all()
     assert torch.isclose(dynamics.max_lv.exp() ** 0.5, max_std * torch.ones(1), atol=1e-5).all()
     
     # test method output shapes on regular batch
-    next_obs_dist, rwd_dist = dynamics.compute_dists(obs, act)
-    logp_obs, logp_rwd =  dynamics.compute_log_prob(obs, act, next_obs, rwd)
-    mix_logp_obs, mix_logp_rwd = dynamics.compute_mixture_log_prob(obs, act, next_obs, rwd)
-    next_obs_sample, rwd_sample = dynamics.sample_dist(obs, act)
+    pred, _ = dynamics.compute_stats(inputs)
+    dist = dynamics.compute_dists(obs, act)
+    logp = dynamics.compute_log_prob(obs, act, next_obs, rwd)
+    mix_logp = dynamics.compute_mixture_log_prob(obs, act, next_obs, rwd)
+    sample = dynamics.sample_dist(obs, act)
     next_obs_step, rwd_step, done = dynamics.step(obs, act)
-
-    assert list(next_obs_dist.mean.shape) == [batch_size, ensemble_dim, obs_dim]
-    assert list(rwd_dist.mean.shape) == [batch_size, ensemble_dim, 1]
-    assert list(next_obs_dist.variance.shape) == [batch_size, ensemble_dim, obs_dim]
-    assert list(rwd_dist.variance.shape) == [batch_size, ensemble_dim, 1]
-    assert list(logp_obs.shape) == [batch_size, ensemble_dim, 1]
-    assert list(logp_rwd.shape) == [batch_size, ensemble_dim, 1]
-    assert list(mix_logp_obs.shape) == [batch_size, 1]
-    assert list(mix_logp_rwd.shape) == [batch_size, 1]
-    assert list(next_obs_sample.shape) == [batch_size, obs_dim]
-    assert list(rwd_sample.shape) == [batch_size, 1]
+    
+    assert list(pred.shape) == [batch_size, ensemble_dim, obs_dim + pred_rwd]
+    assert list(dist.mean.shape) == [batch_size, ensemble_dim, obs_dim + pred_rwd]
+    assert list(dist.variance.shape) == [batch_size, ensemble_dim, obs_dim + pred_rwd]
+    assert list(logp.shape) == [batch_size, ensemble_dim, 1]
+    assert list(mix_logp.shape) == [batch_size, 1]
+    assert list(sample.shape) == [batch_size, obs_dim + pred_rwd]
     assert list(next_obs_step.shape) == [batch_size, obs_dim]
     assert list(rwd_step.shape) == [batch_size, 1]
     assert list(done.shape) == [batch_size, 1]
+    if pred_rwd == False:
+        assert torch.all(rwd_step == 0)
     
     # test method output shapes on separate batch
-    next_obs_dist, rwd_dist = dynamics.compute_dists_separate(obs_sep, act_sep)
-    logp_obs, logp_rwd =  dynamics.compute_log_prob_separate(obs_sep, act_sep, next_obs_sep, rwd_sep)
-    
-    assert list(next_obs_dist.mean.shape) == [batch_size, ensemble_dim, obs_dim]
-    assert list(rwd_dist.mean.shape) == [batch_size, ensemble_dim, 1]
-    assert list(next_obs_dist.variance.shape) == [batch_size, ensemble_dim, obs_dim]
-    assert list(rwd_dist.variance.shape) == [batch_size, ensemble_dim, 1]
-    assert list(logp_obs.shape) == [batch_size, ensemble_dim, 1]
-    assert list(logp_rwd.shape) == [batch_size, ensemble_dim, 1]
-    
+    pred_sep, _ = dynamics.compute_stats_separate(inputs_sep)
+    assert list(pred_sep.shape) == [batch_size, ensemble_dim, obs_dim + pred_rwd]
+
     # test eval
-    stats = dynamics.evaluate(obs, act, next_obs, rwd)
+    stats = dynamics.evaluate(inputs, targets)
     dynamics.update_topk_dist(stats)
     assert sum(dynamics.topk_dist == 0) == (dynamics.ensemble_dim - dynamics.topk)
-
+    
     # test gradients: drop one member and check no gradients
-    logp_obs, logp_rwd = dynamics.compute_log_prob_separate(obs_sep, act_sep, next_obs_sep, rwd_sep)
-    loss = torch.mean(logp_obs[:, :-1] + logp_rwd[:, :-1])
+    pred_sep, _ = dynamics.compute_stats_separate(inputs_sep)
+    loss = torch.mean(pred_sep[:, :-1] - targets_sep[:, :-1])
     loss.backward()
     
     head_weight = dict(dynamics.named_parameters())["mlp.layers.6.weight"]
@@ -95,30 +88,6 @@ def test_ensemble(clip_lv=False, residual=False, termination_fn=None, pred_rwd=F
     for n, p in dynamics.named_parameters():
         if p.grad is not None:
             p.grad.zero_()
-
-    # test gradients: check reward head gradients
-    loss = dynamics.compute_loss(obs_sep, act_sep, next_obs_sep, rwd_sep, use_decay=False)
-    loss.backward()
-    
-    head_weight = dict(dynamics.named_parameters())["mlp.layers.6.weight"]
-    head_bias = dict(dynamics.named_parameters())["mlp.layers.6.bias"]
-    
-    if pred_rwd:
-        assert torch.all(head_weight.grad[:, :, obs_dim] != 0)
-        assert torch.all(head_weight.grad[:, :, obs_dim * 2 + 1] != 0)
-        assert torch.all(head_bias.grad[:, obs_dim] != 0)
-        assert torch.all(head_bias.grad[:, obs_dim * 2 + 1] != 0)
-        if clip_lv:
-            assert torch.all(dynamics.min_lv.grad[obs_dim] != 0)
-            assert torch.all(dynamics.max_lv.grad[obs_dim] != 0)
-    else:
-        assert torch.all(head_weight.grad[:, :, obs_dim] == 0)
-        assert torch.all(head_weight.grad[:, :, obs_dim * 2 + 1] == 0)
-        assert torch.all(head_bias.grad[:, obs_dim] == 0)
-        assert torch.all(head_bias.grad[:, obs_dim * 2 + 1] == 0)
-        if clip_lv:
-            assert torch.all(dynamics.min_lv.grad[obs_dim] == 0)
-            assert torch.all(dynamics.max_lv.grad[obs_dim] == 0)
 
 def test_ensemble_parsing():
     def ensemble_equal(m1, m2):
@@ -201,35 +170,18 @@ if __name__ == "__main__":
     print("soft_clamp passed")
     
     test_ensemble(
-        clip_lv=False, 
         residual=False, 
         termination_fn=None,
         pred_rwd=False
     )
     
     test_ensemble(
-        clip_lv=False, 
         residual=False, 
         termination_fn=termination_fn,
         pred_rwd=True
     )
 
     test_ensemble(
-        clip_lv=True, 
-        residual=False, 
-        termination_fn=termination_fn,
-        pred_rwd=True
-    )
-
-    test_ensemble(
-        clip_lv=True, 
-        residual=False, 
-        termination_fn=termination_fn,
-        pred_rwd=False
-    )
-
-    test_ensemble(
-        clip_lv=True, 
         residual=True, 
         termination_fn=termination_fn,
         pred_rwd=True

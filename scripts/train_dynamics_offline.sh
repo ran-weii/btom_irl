@@ -1,27 +1,5 @@
 #! /bin/bash
 python train_dynamics_offline.py \
---data_name "hopper-medium-expert-v2" \
---cp_path "none" \
---num_samples 100000 \
---pred_rwd True \
---ensemble_dim 7 \
---topk 5 \
---hidden_dim 200 \
---num_hidden 3 \
---activation silu \
---clip_lv True \
---residual True \
---min_std 0.04 \
---max_std 1.6 \
---eval_ratio 0.1 \
---batch_size 256 \
---lr 3e-4 \
---decay "0.000025, 0.00005, 0.000075, 0.000075, 0.0001" \
---grad_clip 1000. \
---bootstrap True \
---epochs 500 \
---max_epochs_since_update 10 \
---cp_every 10 \
---verbose 1 \
---save False \
---seed 0
+--data_name walker2d-medium-expert-v2 \
+--seed 0 \
+--save True
