@@ -23,6 +23,20 @@ def test_update_moving_stats():
     assert np.isclose(new_mean, mean, atol=1e-5)
     assert np.isclose(new_mean_square, mean_square, atol=1e-5)
     assert np.isclose(new_variance, variance, atol=1e-5)
+
+def test_load_d4rl_transitions():
+    from src.utils.data import load_d4rl_transitions
+    data, _, _, _, _ = load_d4rl_transitions(
+        dataset_name="hopper-medium-expert-v2"
+    )
+
+def test_parse_d4rl_stacked_trajectories():
+    from src.utils.data import parse_d4rl_stacked_trajectories
+    data = parse_d4rl_stacked_trajectories(
+        dataset_name="hopper-expert-v2",
+        dataset_path=None,
+        max_eps=None
+    )
     
 if __name__ == "__main__":
     np.random.seed(0)

@@ -1,12 +1,29 @@
 import pickle
 import numpy as np
+from tqdm import tqdm
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
-""" TODO: maybe return a dict with timeouts and add an eps_id column so that parse_stacked_traj can directly used normalized features """
-def load_data(filepath, num_samples, skip_timeout=True, shuffle=True):
-    with open(filepath, "rb") as f:
-        dataset = pickle.load(f)
+def load_d4rl_transitions(
+    dataset_name, dataset_path=None, num_samples=None, skip_timeout=True, 
+    shuffle=False, norm_obs=False, norm_rwd=False
+    ):
+    """ Parse d4rl stacked trajectories into dictionary of transitions 
+    
+    Returns:
+        transition_dataset (dict): dictionary of transitions
+        obs_mean (np.array): observation mean
+        obs_std (np.array): observation std
+        rwd_mean (np.array): reward mean
+        rwd_std (np.array): reward std
+    """
+    if dataset_path is None:
+        import d4rl
+        import gym
+        dataset = gym.make(dataset_name).get_dataset()
+    else:
+        with open(dataset_path, "rb") as f:
+            dataset = pickle.load(f)
     
     # unpack dataset
     obs = dataset["observations"]
@@ -34,47 +51,88 @@ def load_data(filepath, num_samples, skip_timeout=True, shuffle=True):
         terminated = terminated[idx]
     
     # subsample data
-    num_samples = min(num_samples, len(obs))
-
+    num_samples = len(obs) if num_samples is None else min(num_samples, len(obs))
     obs = obs[:num_samples]
     act = act[:num_samples]
     rwd = rwd[:num_samples]
     next_obs = next_obs[:num_samples]
     terminated = terminated[:num_samples]
-    return obs, act, rwd, next_obs, terminated
+    
+    # normalize data
+    obs_mean = 0.
+    obs_std = 1.
+    if norm_obs:
+        obs_mean = obs.mean(0)
+        obs_std = obs.std(0)
+        obs = (obs - obs_mean) / obs_std
+        next_obs = (next_obs - obs_mean) / obs_std
+    
+    rwd_mean = 0.
+    rwd_std = 1.
+    if norm_rwd:
+        rwd_mean = rwd.mean(0)
+        rwd_std = rwd.std(0)
+        rwd = (rwd - rwd_mean) / rwd_std
+    
+    print("\nprocessed data stats")
+    print("obs size:", obs.shape)
+    print("obs_mean:", obs.mean(0).round(2))
+    print("obs_std:", obs.std(0).round(2))
+    print("rwd_mean:", rwd.mean(0).round(2))
+    print("rwd_std:", rwd.std(0).round(2))
+    
+    transition_dataset = {
+        "obs": obs,
+        "act": act,
+        "rwd": rwd,
+        "next_obs": next_obs,
+        "done": terminated,
+    }
+    return transition_dataset, obs_mean, obs_std, rwd_mean, rwd_std
 
-""" TODO: figure out how to do normalization properly and not mess up in between. Should do normalization up front and not inside the agent """
-def parse_stacked_trajectories(data, max_eps=None, skip_terminated=True, obs_mean=None, obs_std=None):
+def parse_d4rl_stacked_trajectories(
+    dataset_name, dataset_path=None, max_eps=None, skip_terminated=False, obs_mean=None, obs_std=None
+    ):
+    """ Parse d4rl stacked trajectories into list of episode dictionaries """
+    if dataset_path is None:
+        import d4rl
+        import gym
+        dataset = gym.make(dataset_name).get_dataset()
+    else:
+        with open(dataset_path, "rb") as f:
+            dataset = pickle.load(f)
+
     obs_mean = 0. if obs_mean is None else obs_mean
     obs_std = 1. if obs_std is None else obs_std
 
-    obs = data["observations"]
-    act = data["actions"]
-    rwd = data["rewards"]
-    next_obs = data["next_observations"]
-    terminated = data["terminals"]
-    timeout = data['timeouts']
+    obs = dataset["observations"]
+    act = dataset["actions"]
+    rwd = dataset["rewards"]
+    next_obs = dataset["next_observations"]
+    terminated = dataset["terminals"]
+    timeout = dataset['timeouts']
 
     eps_id = np.cumsum(terminated + timeout, axis=0).flatten()
     eps_id = np.insert(eps_id, 0, 0)[:-1] # offset by 1 step
     max_eps = eps_id.max() + 1 if max_eps is None else max_eps
-
-    dataset = []
-    for e in np.unique(eps_id):
+    
+    print("parsing d4rl stacked trajectories")
+    traj_dataset = []
+    for e in tqdm(np.unique(eps_id)):
         if terminated[eps_id == e].sum() > 0 and skip_terminated:
             continue
 
-        dataset.append({
+        traj_dataset.append({
             "obs": (obs[eps_id == e] - obs_mean) / obs_std,
             "act": act[eps_id == e],
-            "rwd": rwd[eps_id == e],
+            "rwd": rwd[eps_id == e].reshape(-1, 1),
             "next_obs": (next_obs[eps_id == e] - obs_mean) / obs_std,
-            "done": terminated[eps_id == e],
+            "done": 1 * terminated[eps_id == e].reshape(-1, 1),
         })
 
-        if len(dataset) >= max_eps:
+        if len(traj_dataset) >= max_eps:
             break
-    return dataset
+    return traj_dataset
 
 def collate_fn(batch, pad_value=0):
     """ Collate batch of dict to have the same sequence length """
