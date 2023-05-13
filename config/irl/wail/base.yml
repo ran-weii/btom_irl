@@ -1,0 +1,47 @@
+algo: wail
+exp_path: ../../exp/mujoco/irl
+data_path: ../../data/d4rl
+cp_path: none
+
+# data args
+num_traj: 10
+
+# reward args
+rwd_clip_max: 10.
+
+# policy args
+hidden_dim: 256
+num_hidden: 2 
+activation: relu
+gamma: 0.99
+beta: 1.
+polyak: 0.995
+tune_beta: True
+
+# training args
+buffer_size: 1000000
+batch_size: 256
+real_ratio: 0.5
+d_steps: 30
+a_steps: 50
+lr_d: 3.e-4
+lr_a: 3.e-4
+lr_c: 3.e-4
+decay: 1.e-5
+grad_clip: 100.
+grad_penalty: 1.
+grad_target: 0.
+
+# rollout args
+epochs: 3
+max_steps: 1000
+steps_per_epoch: 1000
+update_after: 2000
+update_every: 50
+num_eval_eps: 10
+eval_steps: 1000
+eval_deterministic: True
+cp_every: 10
+cp_intermediate: False
+verbose: 50
+render: False

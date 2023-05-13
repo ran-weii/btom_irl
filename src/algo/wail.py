@@ -10,7 +10,8 @@ from torch.autograd import grad as torch_grad
 from src.agents.sac import SAC
 from src.agents.nn_models import MLP
 from src.agents.buffer import EpisodeReplayBuffer
-from src.utils.logging import Logger
+from src.utils.evaluate import evaluate
+from src.utils.logger import Logger
 
 class WAIL(SAC):
     """ Wasserstein adversarial imitation learning """
@@ -90,7 +91,7 @@ class WAIL(SAC):
         self.real_buffer = EpisodeReplayBuffer(obs_dim, act_dim, buffer_size, momentum=0.)
         
         self.plot_keys = [
-            "eval_eps_return", "eval_eps_len", "reward_loss", 
+            "eval_eps_return_mean", "eval_eps_len_mean", "reward_loss", 
             "critic_loss", "actor_loss", "log_pi"
         ]
     
@@ -286,16 +287,7 @@ class WAIL(SAC):
 
                 # evaluate episodes
                 if num_eval_eps > 0:
-                    eval_eps = []
-                    eval_returns = []
-                    eval_lens = []
-                    for i in range(num_eval_eps):
-                        eval_eps.append(self.rollout(eval_env, eval_steps, sample_mean=eval_deterministic))
-                        eval_returns.append(sum(eval_eps[-1]["rwd"]))
-                        eval_lens.append(sum(1 - eval_eps[-1]["done"]))
-
-                        logger.push({"eval_eps_return": sum(eval_eps[-1]["rwd"])})
-                        logger.push({"eval_eps_len": sum(1 - eval_eps[-1]["done"])})
+                    evaluate(eval_env, self, num_eval_eps, max_steps, eval_deterministic, logger)
 
                 logger.push({"epoch": epoch + 1})
                 logger.push({"time": time.time() - start_time})
