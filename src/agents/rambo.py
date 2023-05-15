@@ -22,6 +22,7 @@ class RAMBO(MBPO):
         activation, 
         gamma=0.9, 
         beta=0.2, 
+        min_beta=0.001,
         polyak=0.995, 
         tune_beta=True,
         obs_penalty=1., 
@@ -61,6 +62,7 @@ class RAMBO(MBPO):
             activation (str): value network activation
             gamma (float, optional): discount factor. Default=0.9
             beta (float, optional): softmax temperature. Default=0.2
+            min_beta (float, optional): minimum softmax temperature. Default=0.001
             polyak (float, optional): target network polyak averaging factor. Default=0.995
             tune_beta (bool, optional): whether to automatically tune temperature. Default=True
             obs_penalty (float, optional): transition likelihood penalty. Default=1.
@@ -91,7 +93,7 @@ class RAMBO(MBPO):
         """
         super().__init__(
             dynamics, obs_dim, act_dim, act_lim, hidden_dim, num_hidden, activation, 
-            gamma, beta, polyak, tune_beta, False, buffer_size, batch_size, 
+            gamma, beta, min_beta, polyak, tune_beta, False, buffer_size, batch_size, 
             rollout_batch_size, rollout_deterministic, rollout_min_steps, rollout_max_steps, 
             rollout_min_epoch, rollout_max_epoch, model_retain_epochs, None,
             real_ratio, eval_ratio, m_steps, a_steps, lr_a, lr_c, lr_m, grad_clip, device
@@ -246,8 +248,8 @@ class RAMBO(MBPO):
         return stats_epoch
     
     def train_policy(
-        self, eval_env, max_steps, epochs, steps_per_epoch, sample_model_every, update_model_every,
-        rwd_fn=None, num_eval_eps=0, eval_deterministic=True, callback=None, verbose=10
+        self, eval_env, epochs, steps_per_epoch, sample_model_every, update_model_every,
+        num_eval_eps=10, eval_steps=1000, eval_deterministic=True, callback=None, verbose=10
         ):
         logger = Logger()
         start_time = time.time()
@@ -289,7 +291,7 @@ class RAMBO(MBPO):
 
                 # evaluate episodes
                 if num_eval_eps > 0:
-                    evaluate(eval_env, self, num_eval_eps, max_steps, eval_deterministic, logger)
+                    evaluate(eval_env, self, num_eval_eps, eval_steps, eval_deterministic, logger)
 
                 logger.push({"epoch": epoch})
                 logger.push({"time": time.time() - start_time})

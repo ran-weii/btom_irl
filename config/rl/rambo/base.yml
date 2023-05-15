@@ -17,6 +17,7 @@ m_activation: silu
 residual: True
 min_std: 0.04
 max_std: 1.6
+m_decay: [0.000025, 0.00005, 0.000075, 0.000075, 0.0001]
 obs_penalty: 1.
 adv_penalty: 0.1
 adv_rollout_steps: 10
@@ -24,7 +25,6 @@ adv_action_deterministic: True
 adv_include_entropy: False
 adv_clip_max: 40.
 norm_advantage: True
-decay: [0.000025, 0.00005, 0.000075, 0.000075, 0.0001]
 
 # policy args
 a_hidden_dim: 256
@@ -32,6 +32,7 @@ a_num_hidden: 2
 a_activation: relu
 gamma: 0.99
 beta: 1.
+min_beta: 0.001
 polyak: 0.995
 tune_beta: True
 
@@ -57,15 +58,15 @@ grad_clip: 1000.
 # rollout args
 pretrain_steps: 0
 num_pretrain_samples: 100000
-epochs: 1
-max_steps: 1000
+epochs: 500
 steps_per_epoch: 1000
 sample_model_every: 250
 update_model_every: 1000
 update_policy_every: 1
+num_eval_eps: 10
+eval_steps: 1000
+eval_deterministic: True
 cp_every: 10
 cp_intermediate: False
-num_eval_eps: 10
-eval_deterministic: True
 verbose: 50
 render: False

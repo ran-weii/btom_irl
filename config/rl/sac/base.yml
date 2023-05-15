@@ -8,6 +8,7 @@ num_hidden: 2
 activation: relu
 gamma: 0.99
 beta: 1.
+min_beta: 0.001
 polyak: 0.995
 tune_beta: True
 
@@ -25,9 +26,10 @@ max_steps: 1000
 steps_per_epoch: 1000
 update_after: 2000
 update_every: 1
+num_eval_eps: 10
+eval_steps: 1000
+eval_deterministic: True
 cp_every: 10
 cp_intermediate: False
-num_eval_eps: 10
-eval_deterministic: True
 verbose: 100
 render: False

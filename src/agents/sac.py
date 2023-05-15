@@ -9,7 +9,8 @@ import torch.distributions as torch_dist
 import torch.distributions.transforms as torch_transform
 
 # model imports
-from src.agents.nn_models import MLP, DoubleQNetwork
+from src.agents.nn_models import MLP
+from src.agents.critic import DoubleQNetwork, compute_critic_loss
 from src.agents.buffer import ReplayBuffer
 from src.utils.evaluate import evaluate
 from src.utils.logger import Logger
@@ -51,6 +52,7 @@ class SAC(nn.Module):
         activation, 
         gamma=0.9, 
         beta=0.2, 
+        min_beta=0.001,
         polyak=0.995, 
         tune_beta=True, 
         buffer_size=int(1e6), 
@@ -71,6 +73,7 @@ class SAC(nn.Module):
             activation (str): value network activation
             gamma (float, optional): discount factor. Default=0.9
             beta (float, optional): softmax temperature. Default=0.2
+            min_beta (float, optional): minimum softmax temperature. Default=0.001
             polyak (float, optional): target network polyak averaging factor. Default=0.995
             tune_beta (bool, optional): whether to automatically tune temperature. Default=True
             buffer_size (int, optional): replay buffer size. Default=1e6
@@ -87,6 +90,7 @@ class SAC(nn.Module):
         self.act_lim = act_lim.to(device)
         self.gamma = gamma
         self.beta = beta
+        self.min_beta = min_beta
         self.polyak = polyak
         self.tune_beta = tune_beta
         self.beta_target = -act_dim # default temperature target
@@ -160,31 +164,11 @@ class SAC(nn.Module):
             a, _ = self.sample_action(obs, sample_mean)
         return a
 
-    def compute_critic_loss(self, batch, rwd_fn=None):
-        obs = batch["obs"].to(self.device)
-        act = batch["act"].to(self.device)
-        r = batch["rwd"].to(self.device)
-        next_obs = batch["next_obs"].to(self.device)
-        done = batch["done"].to(self.device)
-        
-        with torch.no_grad():
-            if rwd_fn is not None:
-                r = rwd_fn(obs, act)
-
-            # sample next action
-            next_act, logp = self.sample_action(next_obs)
-
-            # compute value target
-            q1_next, q2_next = self.critic_target(next_obs, next_act)
-            q_next = torch.min(q1_next, q2_next)
-            v_next = q_next - self.beta * logp
-            q_target = r + (1 - done) * self.gamma * v_next
-        
-        q1, q2 = self.critic(obs, act)
-        q1_loss = torch.pow(q1 - q_target, 2).mean()
-        q2_loss = torch.pow(q2 - q_target, 2).mean()
-        q_loss = (q1_loss + q2_loss) / 2 
-        return q_loss
+    def compute_critic_loss(self, batch):
+        return compute_critic_loss(
+            batch, self, self.critic, self.critic_target, 
+            self.gamma, self.beta, self.device, use_terminal=False
+        )
     
     def compute_actor_loss(self, batch):
         obs = batch["obs"].to(self.device)
@@ -198,13 +182,14 @@ class SAC(nn.Module):
         beta_loss = -torch.mean(self.log_beta * (logp + self.beta_target).detach())
         return a_loss, beta_loss
 
-    def take_policy_gradient_step(self, batch, rwd_fn=None):
+    def take_policy_gradient_step(self, batch):
         self.actor.train()
         self.critic.train()
         
         # train critic
-        critic_loss = self.compute_critic_loss(batch, rwd_fn)
+        critic_loss = self.compute_critic_loss(batch)
         critic_loss.backward()
+        
         if self.grad_clip is not None:
             nn.utils.clip_grad_norm_(self.critic.parameters(), self.grad_clip)
         self.optimizers["critic"].step()
@@ -233,7 +218,7 @@ class SAC(nn.Module):
                 p_target.data.mul_(self.polyak)
                 p_target.data.add_((1 - self.polyak) * p.data)
             
-            self.beta = self.log_beta.exp().data
+            self.beta = self.log_beta.exp().data.clip(min=self.min_beta)
 
         stats = {
             "actor_loss": actor_loss.cpu().data.item(),
@@ -246,11 +231,11 @@ class SAC(nn.Module):
         self.critic.eval()
         return stats
     
-    def train_policy_epoch(self, rwd_fn=None, logger=None):
+    def train_policy_epoch(self, logger=None):
         policy_stats_epoch = []
         for _ in range(self.steps):
             batch = self.replay_buffer.sample(self.batch_size)
-            policy_stats = self.take_policy_gradient_step(batch, rwd_fn=rwd_fn)
+            policy_stats = self.take_policy_gradient_step(batch)
             policy_stats_epoch.append(policy_stats)
 
             if logger is not None:
@@ -261,7 +246,7 @@ class SAC(nn.Module):
 
     def train_policy(
         self, env, eval_env, max_steps, epochs, steps_per_epoch, update_after, update_every, 
-        rwd_fn=None, num_eval_eps=0, eval_deterministic=True, callback=None, verbose=50
+        num_eval_eps=10, eval_steps=1000, eval_deterministic=True, callback=None, verbose=50
         ):
         logger = Logger()
 
@@ -300,7 +285,7 @@ class SAC(nn.Module):
 
             # train policy
             if (t + 1) > update_after and (t - update_after + 1) % update_every == 0:
-                policy_stats_epoch = self.train_policy_epoch(rwd_fn=rwd_fn, logger=logger)
+                policy_stats_epoch = self.train_policy_epoch(logger=logger)
                 if (t + 1) % verbose == 0:
                     round_loss_dict = {k: round(v, 3) for k, v in policy_stats_epoch.items()}
                     print(f"e: {epoch + 1}, t: {t + 1}, {round_loss_dict}")
@@ -311,7 +296,7 @@ class SAC(nn.Module):
 
                 # evaluate episodes
                 if num_eval_eps > 0:
-                    evaluate(eval_env, self, num_eval_eps, max_steps, eval_deterministic, logger)
+                    evaluate(eval_env, self, num_eval_eps, eval_steps, eval_deterministic, logger)
 
                 logger.push({"epoch": epoch + 1})
                 logger.push({"time": time.time() - start_time})

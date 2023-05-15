@@ -42,6 +42,8 @@ def parse_args():
     parser.add_argument("--residual", type=bool_, default=True, help="whether to predict observation residual, default=True")
     parser.add_argument("--min_std", type=float, default=0.04, help="dynamics minimum prediction std, default=0.04")
     parser.add_argument("--max_std", type=float, default=1.6, help="dynamics maximum prediction std, default=1.6")
+    parser.add_argument("--m_decay", type=list_, default=[0.000025, 0.00005, 0.000075, 0.000075, 0.0001], 
+        help="weight decay for each layer, default=[0.000025, 0.00005, 0.000075, 0.000075, 0.0001]")
     parser.add_argument("--obs_penalty", type=float, default=1., help="transition likelihood penalty, default=1.")
     parser.add_argument("--adv_penalty", type=float, default=0.1, help="model advantage penalty, default=0.1")
     parser.add_argument("--adv_rollout_steps", type=int, default=10, help="advantage rollout steps, default=10")
@@ -49,14 +51,13 @@ def parse_args():
     parser.add_argument("--adv_include_entropy", type=bool_, default=False, help="whether to include entropy in advantage, default=False")
     parser.add_argument("--adv_clip_max", type=float, default=40., help="clip advantage max value, default=40.")
     parser.add_argument("--norm_advantage", type=bool_, default=True, help="whether to normalize advantage, default=True")
-    parser.add_argument("--decay", type=list_, default=[0.000025, 0.00005, 0.000075, 0.000075, 0.0001], 
-        help="weight decay for each layer, default=[0.000025, 0.00005, 0.000075, 0.000075, 0.0001]")
     # policy args
     parser.add_argument("--a_hidden_dim", type=int, default=256, help="policy neural network hidden dims, default=256")
     parser.add_argument("--a_num_hidden", type=int, default=2, help="policy number of hidden layers, default=2")
     parser.add_argument("--a_activation", type=str, default="relu", help="policy neural network activation, default=relu")
     parser.add_argument("--gamma", type=float, default=0.99, help="trainer discount factor, default=0.99")
     parser.add_argument("--beta", type=float, default=0.2, help="softmax temperature, default=0.2")
+    parser.add_argument("--min_beta", type=float, default=0.001, help="minimum softmax temperature, default=0.001")
     parser.add_argument("--polyak", type=float, default=0.995, help="polyak averaging factor, default=0.995")
     parser.add_argument("--tune_beta", type=bool_, default=True, help="whether to tune beta, default=True")
     # training args
@@ -82,15 +83,15 @@ def parse_args():
     parser.add_argument("--pretrain_steps", type=int, default=50, help="number of dynamics and reward pretraining steps, default=50")
     parser.add_argument("--num_pretrain_samples", type=int, default=100000, help="number of dynamics and reward pretraining samples, default=1e5")
     parser.add_argument("--epochs", type=int, default=2000, help="number of training epochs, default=2000")
-    parser.add_argument("--max_steps", type=int, default=1000, help="max steps per episode, default=1000")
     parser.add_argument("--steps_per_epoch", type=int, default=1000)
     parser.add_argument("--sample_model_every", type=int, default=250)
     parser.add_argument("--update_model_every", type=int, default=1000)
     parser.add_argument("--update_policy_every", type=int, default=1)
+    parser.add_argument("--num_eval_eps", type=int, default=5, help="number of evaluation episodes, default=5")
+    parser.add_argument("--eval_steps", type=int, default=1000, help="number of evaluation steps, default=1000")
+    parser.add_argument("--eval_deterministic", type=bool_, default=True, help="whether to evaluate deterministically, default=True")
     parser.add_argument("--cp_every", type=int, default=10, help="checkpoint interval, default=10")
     parser.add_argument("--cp_intermediate", type=bool, default=False, help="whether to save intermediate checkpoints, default=False")
-    parser.add_argument("--num_eval_eps", type=int, default=5, help="number of evaluation episodes, default=5")
-    parser.add_argument("--eval_deterministic", type=bool_, default=True, help="whether to evaluate deterministically, default=True")
     parser.add_argument("--verbose", type=int, default=10, help="verbose frequency, default=10")
     parser.add_argument("--render", type=bool_, default=False)
     parser.add_argument("--save", type=bool_, default=True)
@@ -143,7 +144,7 @@ def main(arglist):
         hidden_dim=arglist["m_hidden_dim"],
         num_hidden=arglist["m_num_hidden"],
         activation=arglist["m_activation"],
-        decay=arglist["decay"],
+        decay=arglist["m_decay"],
         residual=arglist["residual"],
         termination_fn=termination_fn,
         min_std=arglist["min_std"],
@@ -254,13 +255,12 @@ def main(arglist):
     
     logger = agent.train_policy(
         eval_env, 
-        arglist["max_steps"], 
         arglist["epochs"], 
         arglist["steps_per_epoch"],
         arglist["sample_model_every"], 
         arglist["update_model_every"],
-        rwd_fn=None, 
         num_eval_eps=arglist["num_eval_eps"], 
+        eval_steps=arglist["eval_steps"],
         eval_deterministic=arglist["eval_deterministic"], 
         callback=callback, 
         verbose=arglist["verbose"]

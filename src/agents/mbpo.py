@@ -29,6 +29,7 @@ class MBPO(SAC):
         activation, 
         gamma=0.9, 
         beta=0.2, 
+        min_beta=0.001,
         polyak=0.995, 
         tune_beta=True, 
         norm_obs=True,
@@ -63,6 +64,7 @@ class MBPO(SAC):
             activation (str): value network activation
             gamma (float, optional): discount factor. Default=0.9
             beta (float, optional): softmax temperature. Default=0.2
+            min_beta (float, optional): minimum softmax temperature. Default=0.001
             polyak (float, optional): target network polyak averaging factor. Default=0.995
             tune_beta (bool, optional): whether to automatically tune temperature. Default=True
             norm_obs (bool, optional): whether to normalize observations. Default=True
@@ -88,8 +90,8 @@ class MBPO(SAC):
         """
         super().__init__(
             obs_dim, act_dim, act_lim, hidden_dim, num_hidden, activation, 
-            gamma, beta, polyak, tune_beta, buffer_size, batch_size, a_steps, 
-            lr_a, lr_c, grad_clip, device
+            gamma, beta, min_beta, polyak, tune_beta, buffer_size, batch_size, 
+            a_steps, lr_a, lr_c, grad_clip, device
         )
         self.norm_obs = norm_obs
         self.rollout_batch_size = rollout_batch_size
@@ -141,7 +143,7 @@ class MBPO(SAC):
             logger.push(stats)
         return stats
     
-    def train_policy_epoch(self, rwd_fn=None, logger=None):
+    def train_policy_epoch(self, logger=None):
         policy_stats_epoch = []
         for _ in range(self.steps):
             # mix real and fake data
@@ -152,7 +154,7 @@ class MBPO(SAC):
                 for ((real_k, real_v), (fake_k, fake_v)) 
                 in zip(real_batch.items(), fake_batch.items())
             }
-            policy_stats = self.take_policy_gradient_step(batch, rwd_fn=rwd_fn)
+            policy_stats = self.take_policy_gradient_step(batch)
             policy_stats_epoch.append(policy_stats)
 
             if logger is not None:
@@ -256,8 +258,8 @@ class MBPO(SAC):
 
     def train_policy(
         self, env, eval_env, max_steps, epochs, steps_per_epoch, update_after, 
-        update_model_every, update_policy_every, rwd_fn=None, 
-        num_eval_eps=0, eval_deterministic=True, callback=None, verbose=50
+        update_model_every, update_policy_every, num_eval_eps=10,
+        eval_steps=1000, eval_deterministic=True, callback=None, verbose=50
         ):
         logger = Logger()
 
@@ -329,7 +331,7 @@ class MBPO(SAC):
 
                 # evaluate episodes
                 if num_eval_eps > 0:
-                    evaluate(eval_env, self, num_eval_eps, max_steps, eval_deterministic, logger)
+                    evaluate(eval_env, self, num_eval_eps, eval_steps, eval_deterministic, logger)
 
                 logger.push({"epoch": epoch + 1})
                 logger.push({"time": time.time() - start_time})

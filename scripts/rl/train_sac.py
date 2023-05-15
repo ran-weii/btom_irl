@@ -25,6 +25,7 @@ def parse_args():
     parser.add_argument("--activation", type=str, default="relu", help="neural network activation, default=relu")
     parser.add_argument("--gamma", type=float, default=0.99, help="trainer discount factor, default=0.9")
     parser.add_argument("--beta", type=float, default=0.2, help="softmax temperature, default=0.1")
+    parser.add_argument("--min_beta", type=float, default=0.001, help="minimum softmax temperature, default=0.001")
     parser.add_argument("--polyak", type=float, default=0.995, help="polyak averaging factor, default=0.995")
     parser.add_argument("--tune_beta", type=bool_, default=True, help="whether to tune beta, default=True")
     # training args
@@ -41,10 +42,11 @@ def parse_args():
     parser.add_argument("--steps_per_epoch", type=int, default=4000)
     parser.add_argument("--update_after", type=int, default=2000)
     parser.add_argument("--update_every", type=int, default=50)
+    parser.add_argument("--num_eval_eps", type=int, default=5, help="number of evaluation episodes, default=5")
+    parser.add_argument("--eval_steps", type=int, default=1000, help="number of evaluation steps, default=1000")
+    parser.add_argument("--eval_deterministic", type=bool_, default=True, help="whether to evaluate deterministically, default=True")
     parser.add_argument("--cp_every", type=int, default=10, help="checkpoint interval, default=10")
     parser.add_argument("--cp_intermediate", type=bool, default=False, help="whether to save intermediate checkpoints, default=False")
-    parser.add_argument("--num_eval_eps", type=int, default=5, help="number of evaluation episodes, default=5")
-    parser.add_argument("--eval_deterministic", type=bool_, default=True, help="whether to evaluate deterministically, default=True")
     parser.add_argument("--verbose", type=int, default=50, help="verbose interval, default=50")
     parser.add_argument("--render", type=bool_, default=False)
     parser.add_argument("--save", type=bool_, default=True)
@@ -85,6 +87,7 @@ def main(arglist):
         arglist["activation"],
         gamma=arglist["gamma"], 
         beta=arglist["beta"], 
+        min_beta=arglist["min_beta"],
         polyak=arglist["polyak"], 
         tune_beta=arglist["tune_beta"],
         buffer_size=arglist["buffer_size"], 
@@ -120,9 +123,18 @@ def main(arglist):
     eval_env.np_random = gym.utils.seeding.np_random(arglist["seed"])[0]
     
     logger = agent.train_policy(
-        env, eval_env, arglist["max_steps"], arglist["epochs"], arglist["steps_per_epoch"],
-        arglist["update_after"], arglist["update_every"], rwd_fn=None, num_eval_eps=arglist["num_eval_eps"],
-        eval_deterministic=arglist["eval_deterministic"], callback=callback, verbose=arglist["verbose"]
+        env, 
+        eval_env, 
+        arglist["max_steps"], 
+        arglist["epochs"], 
+        arglist["steps_per_epoch"],
+        arglist["update_after"], 
+        arglist["update_every"], 
+        num_eval_eps=arglist["num_eval_eps"],
+        eval_steps=arglist["eval_steps"], 
+        eval_deterministic=arglist["eval_deterministic"], 
+        callback=callback, 
+        verbose=arglist["verbose"]
     )
 
     if arglist["save"]:
