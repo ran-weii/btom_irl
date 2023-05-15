@@ -7,7 +7,11 @@ cp_path: none
 num_traj: 10
 
 # reward args
+state_only: False
 rwd_clip_max: 10.
+d_decay: 1.e-5
+grad_penalty: 1.
+grad_target: 1.
 
 # policy args
 hidden_dim: 256
@@ -15,6 +19,7 @@ num_hidden: 2
 activation: relu
 gamma: 0.99
 beta: 1.
+min_beta: 0.2
 polyak: 0.995
 tune_beta: True
 
@@ -27,13 +32,10 @@ a_steps: 50
 lr_d: 3.e-4
 lr_a: 3.e-4
 lr_c: 3.e-4
-decay: 1.e-5
 grad_clip: 100.
-grad_penalty: 1.
-grad_target: 0.
 
 # rollout args
-epochs: 3
+epochs: 500
 max_steps: 1000
 steps_per_epoch: 1000
 update_after: 2000

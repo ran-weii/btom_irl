@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import torch 
 
+from src.algo.reward import Reward
 from src.algo.wail import WAIL
 from src.utils.data import parse_d4rl_stacked_trajectories
 from src.utils.logger import SaveCallback, load_checkpoint
@@ -24,15 +25,21 @@ def parse_args():
     parser.add_argument("--cp_path", type=str, default="none", help="checkpoint path, default=none")
     # data args
     parser.add_argument("--num_traj", type=int, default=10, help="number of training trajectories, default=10")
-    # algo args
+    # reward args
+    parser.add_argument("--state_only", type=bool_, default=False, help="whether to use state only reward, default=False")
+    parser.add_argument("--rwd_clip_max", type=float, default=10., help="clip reward max value, default=10.")
+    parser.add_argument("--d_decay", type=float, default=1e-5, help="reward weight decay, default=1e-5")
+    parser.add_argument("--grad_penalty", type=float, default=1., help="reward gradient penalty, default=1.")
+    parser.add_argument("--grad_target", type=float, default=1., help="rewrd gradient target, default=1.")
+    # policy args
     parser.add_argument("--hidden_dim", type=int, default=128, help="neural network hidden dims, default=128")
     parser.add_argument("--num_hidden", type=int, default=2, help="number of hidden layers, default=2")
     parser.add_argument("--activation", type=str, default="relu", help="neural network activation, default=relu")
     parser.add_argument("--gamma", type=float, default=0.99, help="trainer discount factor, default=0.9")
     parser.add_argument("--beta", type=float, default=0.2, help="softmax temperature, default=1.")
+    parser.add_argument("--min_beta", type=float, default=0.001, help="minimum softmax temperature, default=0.001")
     parser.add_argument("--polyak", type=float, default=0.995, help="polyak averaging factor, default=0.995")
     parser.add_argument("--tune_beta", type=bool_, default=True, help="whether to tune beta, default=True")
-    parser.add_argument("--rwd_clip_max", type=float, default=10., help="clip reward max value, default=10.")
     # training args
     parser.add_argument("--buffer_size", type=int, default=1e6, help="replay buffer size, default=1e6")
     parser.add_argument("--batch_size", type=int, default=256, help="reward training batch size, default=256")
@@ -42,10 +49,7 @@ def parse_args():
     parser.add_argument("--lr_d", type=float, default=0.0003, help="reward learning rate, default=0.0003")
     parser.add_argument("--lr_a", type=float, default=0.0003, help="agent learning rate, default=0.0003")
     parser.add_argument("--lr_c", type=float, default=0.0003, help="critic learning rate, default=0.0003")
-    parser.add_argument("--decay", type=float, default=1e-5, help="reward weight decay, default=1e-5")
     parser.add_argument("--grad_clip", type=float, default=100., help="gradient clipping, default=100.")
-    parser.add_argument("--grad_penalty", type=float, default=1., help="gradient penalty, default=1.")
-    parser.add_argument("--grad_target", type=float, default=1., help="gradient target, default=1.")
     # rollout args
     parser.add_argument("--env_name", type=str, default="Hopper-v2", help="environment name, default=Hopper-v4")
     parser.add_argument("--epochs", type=int, default=1000, help="number of reward training epochs, default=1000")
@@ -88,8 +92,22 @@ def main(arglist):
     obs_dim = traj_dataset[0]["obs"].shape[-1]
     act_dim = traj_dataset[0]["act"].shape[-1]
     act_lim = torch.ones(act_dim)
-
+    
+    reward = Reward(
+        obs_dim,
+        act_dim,
+        arglist["hidden_dim"], 
+        arglist["num_hidden"], 
+        arglist["activation"],
+        state_only=arglist["state_only"],
+        clip_max=arglist["rwd_clip_max"],
+        decay=arglist["d_decay"],
+        grad_penalty=arglist["grad_penalty"],
+        grad_target=arglist["grad_target"],
+        device=device
+    )
     agent = WAIL(
+        reward,
         obs_dim, 
         act_dim, 
         act_lim, 
@@ -98,9 +116,9 @@ def main(arglist):
         arglist["activation"],
         gamma=arglist["gamma"], 
         beta=arglist["beta"], 
+        min_beta=arglist["min_beta"],
         polyak=arglist["polyak"],
         tune_beta=arglist["tune_beta"],
-        rwd_clip_max=arglist["rwd_clip_max"],
         buffer_size=arglist["buffer_size"],
         batch_size=arglist["batch_size"], 
         real_ratio=arglist["real_ratio"],
@@ -109,16 +127,13 @@ def main(arglist):
         lr_a=arglist["lr_a"], 
         lr_c=arglist["lr_c"], 
         lr_d=arglist["lr_d"], 
-        decay=arglist["decay"], 
         grad_clip=arglist["grad_clip"],
-        grad_penalty=arglist["grad_penalty"],
-        grad_target=arglist["grad_target"],
         device=device
     )
     agent.to(device)
     plot_keys = agent.plot_keys
 
-    agent.fill_real_buffer(traj_dataset)
+    agent.fill_expert_buffer(traj_dataset)
     
     # load checkpoint
     cp_history = None
@@ -155,8 +170,8 @@ def main(arglist):
         arglist["steps_per_epoch"], 
         arglist["update_after"], 
         arglist["update_every"],
-        eval_steps=arglist["eval_steps"],
         num_eval_eps=arglist["num_eval_eps"],
+        eval_steps=arglist["eval_steps"],
         eval_deterministic=arglist["eval_deterministic"],
         callback=callback, 
         verbose=arglist["verbose"]
