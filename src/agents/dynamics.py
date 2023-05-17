@@ -326,6 +326,30 @@ def set_ensemble_params(ensemble, params_list):
         if "weight" in n or "bias" in n:
             p.data = torch.stack([params_list[i][n] for i in range(ensemble_dim)])
 
+def remove_reward_head(state_dict, obs_dim, num_hidden):
+    weight_key = "dynamics.mlp.layers.{}.weight".format(2 * (num_hidden + 1))
+    bias_key = "dynamics.mlp.layers.{}.bias".format(2 * (num_hidden + 1))
+    head_weight = state_dict["model_state_dict"][weight_key]
+    head_bias = state_dict["model_state_dict"][bias_key]
+    
+    if head_weight.shape[-1] > (obs_dim * 2):
+        head_weight_mu, head_weight_lv = torch.chunk(head_weight, 2, dim=-1)
+        head_bias_mu, head_bias_lv = torch.chunk(head_bias, 2, dim=-1)
+
+        head_weight_mu = head_weight_mu[..., :-1]
+        head_weight_lv = head_weight_lv[..., :-1]
+        head_bias_mu = head_bias_mu[..., :-1]
+        head_bias_lv = head_bias_lv[..., :-1]
+
+        head_weight = torch.cat([head_weight_mu, head_weight_lv], dim=-1)
+        head_bias = torch.cat([head_bias_mu, head_bias_lv], dim=-1)
+
+        state_dict["model_state_dict"][weight_key] = head_weight
+        state_dict["model_state_dict"][bias_key] = head_bias
+        state_dict["model_state_dict"]["dynamics.min_lv"] = state_dict["model_state_dict"]["dynamics.min_lv"][:-1]
+        state_dict["model_state_dict"]["dynamics.max_lv"] = state_dict["model_state_dict"]["dynamics.max_lv"][:-1]
+    return state_dict
+        
 def format_samples_for_training(batch, residual=True, pred_rwd=True):
     """ Formate transition samples into inputs and targets 
     
