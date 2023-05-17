@@ -1,0 +1,85 @@
+algo: rtom
+exp_path: ../../exp/mujoco/irl
+data_path: ../../data/d4rl
+cp_path: none
+
+# data args
+num_traj: 10
+num_samples: 2000000
+norm_obs: True
+norm_rwd: False
+
+# reward args
+state_only: False
+rwd_clip_max: 10.
+d_decay: 1.e-3
+grad_penalty: 1.
+grad_target: 1.
+rwd_rollout_batch_size: 64
+rwd_rollout_steps: 100
+rwd_update_method: traj
+
+# dynamics args
+ensemble_dim: 7
+topk: 5
+m_hidden_dim: 200
+m_num_hidden: 3
+m_activation: silu
+residual: True
+min_std: 0.04
+max_std: 1.6
+m_decay: [0.000025, 0.00005, 0.000075, 0.000075, 0.0001]
+obs_penalty: 1.
+adv_penalty: 0.1
+adv_rollout_steps: 10
+adv_action_deterministic: True
+adv_include_entropy: False
+adv_clip_max: 40.
+norm_advantage: True
+
+# policy args
+a_hidden_dim: 256
+a_num_hidden: 2
+a_activation: relu
+gamma: 0.99
+beta: 1.
+min_beta: 0.001
+polyak: 0.995
+tune_beta: True
+
+# training args
+buffer_size: 2000000
+batch_size: 256
+rollout_batch_size: 8000
+rollout_deterministic: False
+rollout_min_steps: 40
+rollout_max_steps: 40
+rollout_min_epoch: 50
+rollout_max_epoch: 200
+model_retain_epochs: 5
+real_ratio: 0.5
+eval_ratio: 0.2
+d_steps: 1
+a_steps: 1
+m_steps: 50
+lr_a: 3.e-4
+lr_c: 3.e-4
+lr_d: 1.e-4
+lr_m: 1.e-4
+grad_clip: 1000.
+
+# rollout args
+pretrain_steps: 0
+num_pretrain_samples: 100000
+epochs: 500
+steps_per_epoch: 1000
+sample_model_every: 250
+update_model_every: 1000
+update_policy_every: 1
+cp_every: 10
+cp_intermediate: False
+num_eval_eps: 10
+eval_steps: 1000
+eval_deterministic: True
+verbose: 50
+render: False
