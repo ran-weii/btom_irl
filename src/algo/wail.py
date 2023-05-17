@@ -8,7 +8,7 @@ import torch.nn as nn
 from src.agents.sac import SAC
 from src.agents.buffer import EpisodeReplayBuffer
 from src.agents.critic import compute_critic_loss
-from src.utils.evaluate import evaluate
+from src.utils.evaluation import evaluate_episodes, evaluate_policy
 from src.utils.logger import Logger
 
 class WAIL(SAC):
@@ -40,6 +40,7 @@ class WAIL(SAC):
         ):
         """
         Args:
+            reward (Reward): reward function object
             obs_dim (int): observation dimension
             act_dim (int): action dimension
             act_lim (torch.tensor): action limits
@@ -200,13 +201,11 @@ class WAIL(SAC):
 
                 # evaluate episodes
                 if num_eval_eps > 0:
-                    evaluate(eval_env, self, num_eval_eps, eval_steps, eval_deterministic, logger)
+                    evaluate_episodes(eval_env, self, num_eval_eps, eval_steps, eval_deterministic, logger)
                 
                 # evaluate policy
-                with torch.no_grad():
-                    batch = self.expert_buffer.sample(1000)
-                    log_pi = self.compute_action_likelihood(batch["obs"],batch["act"])
-                    logger.push({"log_pi": log_pi.cpu().mean().data.item()})
+                batch = self.expert_buffer.sample(1000)
+                evaluate_policy(batch, self, logger)
 
                 logger.push({"epoch": epoch + 1})
                 logger.push({"time": time.time() - start_time})

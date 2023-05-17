@@ -6,7 +6,7 @@ import torch.nn as nn
 
 from src.agents.mbpo import MBPO
 from src.agents.dynamics import get_random_index, format_samples_for_training
-from src.utils.evaluate import evaluate
+from src.utils.evaluation import evaluate_episodes
 from src.utils.logger import Logger
 
 class RAMBO(MBPO):
@@ -20,21 +20,21 @@ class RAMBO(MBPO):
         hidden_dim, 
         num_hidden, 
         activation, 
-        gamma=0.9, 
-        beta=0.2, 
+        gamma=0.99, 
+        beta=1., 
         min_beta=0.001,
         polyak=0.995, 
         tune_beta=True,
         obs_penalty=1., 
         adv_penalty=0.1,
         adv_rollout_steps=10, 
-        adv_action_deterministic=False,
+        adv_action_deterministic=True,
         adv_include_entropy=False,
         adv_clip_max=6.,
-        norm_advantage=False,
-        buffer_size=1e6, 
-        batch_size=200, 
-        rollout_batch_size=10000, 
+        norm_advantage=True,
+        buffer_size=2e6, 
+        batch_size=256, 
+        rollout_batch_size=50000, 
         rollout_deterministic=False,
         rollout_min_steps=5, 
         rollout_max_steps=5, 
@@ -60,21 +60,21 @@ class RAMBO(MBPO):
             hidden_dim (int): value network hidden dim
             num_hidden (int): value network hidden layers
             activation (str): value network activation
-            gamma (float, optional): discount factor. Default=0.9
-            beta (float, optional): softmax temperature. Default=0.2
+            gamma (float, optional): discount factor. Default=0.99
+            beta (float, optional): softmax temperature. Default=1.
             min_beta (float, optional): minimum softmax temperature. Default=0.001
             polyak (float, optional): target network polyak averaging factor. Default=0.995
             tune_beta (bool, optional): whether to automatically tune temperature. Default=True
             obs_penalty (float, optional): transition likelihood penalty. Default=1.
             adv_penalty (float, optional): model advantage penalty. Default=0.1
             adv_rollout_steps (int, optional): adversarial rollout steps. Default=10.
-            adv_action_deterministic (bool, optional): whether to use deterministic action in advantage. Default=False
+            adv_action_deterministic (bool, optional): whether to use deterministic action in advantage. Default=True
             adv_include_entropy (bool, optional): whether to include entropy in advantage. Default=False
             adv_clip_max (float, optional): advantage clipping threshold. Default=6.
-            norm_advantage (bool, optional): whether to normalize advantage. Default=False
-            buffer_size (int, optional): replay buffer size. Default=1e6
-            batch_size (int, optional): actor and critic batch size. Default=100
-            rollout_batch_size (int, optional): model_rollout batch size. Default=10000
+            norm_advantage (bool, optional): whether to normalize advantage. Default=True
+            buffer_size (int, optional): replay buffer size. Default=2e6
+            batch_size (int, optional): actor and critic batch size. Default=256
+            rollout_batch_size (int, optional): model_rollout batch size. Default=50000
             rollout_deterministic (bool, optional): whether to rollout deterministically. Default=False
             rollout_min_steps (int, optional): initial model rollout steps. Default=5
             rollout_max_steps (int, optional): maximum model rollout steps. Default=5
@@ -192,7 +192,7 @@ class RAMBO(MBPO):
         inputs, targets = format_samples_for_training(
             data, 
             residual=self.dynamics.residual,
-            pred_rwd=True
+            pred_rwd=self.dynamics.pred_rwd
         )
 
         train_inputs = inputs[:-num_eval]
@@ -264,7 +264,8 @@ class RAMBO(MBPO):
                     rollout_steps, steps_per_epoch, sample_model_every
                 )
                 self.sample_imagined_data(
-                    self.replay_buffer, self.rollout_batch_size, rollout_steps, self.rollout_deterministic, mix=False
+                    self.real_buffer, self.replay_buffer, 
+                    self.rollout_batch_size, rollout_steps, self.rollout_deterministic
                 )
                 print("rollout_steps: {}, real buffer size: {}, fake buffer size: {}".format(
                     rollout_steps, self.real_buffer.size, self.replay_buffer.size
@@ -291,7 +292,7 @@ class RAMBO(MBPO):
 
                 # evaluate episodes
                 if num_eval_eps > 0:
-                    evaluate(eval_env, self, num_eval_eps, eval_steps, eval_deterministic, logger)
+                    evaluate_episodes(eval_env, self, num_eval_eps, eval_steps, eval_deterministic, logger)
 
                 logger.push({"epoch": epoch})
                 logger.push({"time": time.time() - start_time})
