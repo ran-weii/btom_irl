@@ -127,3 +127,11 @@ class Reward(nn.Module):
         grad_norm = torch.linalg.norm(grad, dim=-1)
         grad_pen = torch.pow(grad_norm - self.grad_target, 2).mean()
         return grad_pen 
+    
+    def compute_decay_loss(self):
+        loss = 0
+        for layer in self.mlp.layers:
+            if hasattr(layer, "weight"):
+                loss += torch.sum(layer.weight ** 2) / 2.
+                # loss += torch.sum(layer.bias ** 2) / 2.
+        return loss
