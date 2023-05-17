@@ -60,13 +60,14 @@ def compute_critic_loss(
     ):
     obs = batch["obs"].to(device)
     act = batch["act"].to(device)
-    r = batch["rwd"].to(device)
     next_obs = batch["next_obs"].to(device)
     done = batch["done"].to(device)
 
     with torch.no_grad():
         if rwd_fn is not None:
             r = rwd_fn(obs, act, done)
+        else:
+            r = batch["rwd"].to(device)
 
         # sample next action
         next_act, logp = policy.sample_action(next_obs)

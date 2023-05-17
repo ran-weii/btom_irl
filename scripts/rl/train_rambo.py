@@ -161,6 +161,7 @@ def main(arglist):
         arglist["a_activation"],
         gamma=arglist["gamma"], 
         beta=arglist["beta"], 
+        min_beta=arglist["min_beta"],
         polyak=arglist["polyak"],
         tune_beta=arglist["tune_beta"],
         obs_penalty=arglist["obs_penalty"], 
