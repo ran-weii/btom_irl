@@ -163,26 +163,33 @@ class MBPO(SAC):
         policy_stats_epoch = pd.DataFrame(policy_stats_epoch).mean(0).to_dict()
         return policy_stats_epoch
     
-    def rollout_dynamics(self, obs, done, rollout_steps, rollout_deterministic=False):
-        """ Rollout dynamics model
+    def rollout_dynamics(
+        self, obs, act=None, rollout_steps=5, 
+        rollout_deterministic=False, terminate_early=True, flatten=True
+        ):
+        """ Rollout dynamics model from initial states
 
         Args:
-            obs (torch.tensor): observations. size=[batch_size, obs_dim]
-            done (torch.tensor): done flag. size=[batch_size, 1]
-            rollout_steps (int): number of rollout steps.
+            obs (torch.tensor): initial observations. size=[batch_size, obs_dim]
+            act (torch.tensor, optional): initial actions. size=[batch_size, act_dim]
+            rollout_steps (int, optional): number of rollout steps. Default=5
             rollout_deterministic (bool, optional): whether to rollout deterministically. Default=False
+            terminate_early (bool, optional): whether to terminate before rollout steps. Default=True
+            flatten (bool, optional): whether to flatten trajectories into transitions. Default=True
 
         Returns:
-            data (dict): size=[rollout_steps, batch_size, dim]
+            data (dict): dictionary of trajectories or transitions. size=[rollout_steps, batch_size, dim]
         """
         self.dynamics.eval()
         
         obs = obs.clone()
-        done = done.clone()
         data = {"obs": [], "act": [], "next_obs": [], "rwd": [], "done": []}
         for t in range(rollout_steps):
             with torch.no_grad():
-                act = self.choose_action(obs)
+                if t == 0 and act is not None:
+                    pass
+                else:
+                    act = self.choose_action(obs)
                 next_obs, rwd, done = self.dynamics.step(obs, act, sample_mean=rollout_deterministic)
 
             data["obs"].append(obs)
@@ -191,45 +198,42 @@ class MBPO(SAC):
             data["rwd"].append(rwd)
             data["done"].append(done)
             
-            obs = next_obs[done.flatten() == 0].clone()            
+            if terminate_early:
+                obs = next_obs[done.flatten() == 0].clone()
+            else:
+                obs = next_obs.clone()
+            
             if len(obs) == 0:
                 break
         
-        data["obs"] = torch.cat(data["obs"], dim=0)
-        data["act"] = torch.cat(data["act"], dim=0)
-        data["next_obs"] = torch.cat(data["next_obs"], dim=0)
-        data["rwd"] = torch.cat(data["rwd"], dim=0)
-        data["done"] = torch.cat(data["done"], dim=0)
+        if flatten:
+            data = {k: torch.cat(v, dim=0) for k, v in data.items()}
+        else:
+            data = {k: torch.stack(v) for k, v in data.items()}
         return data
     
-    def sample_imagined_data(self, buffer, batch_size, rollout_steps, rollout_deterministic=False, mix=True):
+    def sample_imagined_data(
+        self, source_buffer, target_buffer, batch_size, rollout_steps, rollout_deterministic=False
+        ):
         """ Sample model rollout data and add to replay buffer
         
         Args:
-            buffer (ReplayBuffer): replay buffer to store data
-            batch_size (int): rollout batch size
+            source_buffer (ReplayBuffer): replay buffer to draw initial observations
+            target_buffer (ReplayBuffer): replay buffer to store simulated samples
+            batch_size (int): model rollout batch size
             rollout_steps (int): model rollout steps
             rollout_deterministic (bool, optional): whether to rollout deterministically. Default=False
-            mix (bool, optional): whether to mix real and fake initial states
         """
-        if not mix:
-            batch = self.real_buffer.sample(batch_size)
-        else:
-            real_batch = self.real_buffer.sample(int(batch_size/2))
-            fake_batch = self.replay_buffer.sample(int(batch_size/2))
-            batch = {
-                real_k: torch.cat([real_v, fake_v], dim=0) 
-                for ((real_k, real_v), (fake_k, fake_v)) 
-                in zip(real_batch.items(), fake_batch.items())
-            }
+        batch = source_buffer.sample(batch_size)
         
         rollout_data = self.rollout_dynamics(
             batch["obs"].to(self.device), 
-            batch["done"].to(self.device), 
-            rollout_steps,
-            rollout_deterministic=rollout_deterministic
+            rollout_steps=rollout_steps,
+            rollout_deterministic=rollout_deterministic,
+            terminate_early=True,
+            flatten=True
         )
-        buffer.push_batch(
+        target_buffer.push_batch(
             rollout_data["obs"].cpu().numpy(),
             rollout_data["act"].cpu().numpy(),
             rollout_data["rwd"].cpu().numpy(),
@@ -319,7 +323,8 @@ class MBPO(SAC):
                     rollout_steps, steps_per_epoch, update_model_every
                 )
                 self.sample_imagined_data(
-                    self.replay_buffer, self.rollout_batch_size, rollout_steps, self.rollout_deterministic, mix=False
+                    self.real_buffer, self.replay_buffer, 
+                    self.rollout_batch_size, rollout_steps, self.rollout_deterministic
                 )
                 print("rollout_steps: {}, real buffer size: {}, fake buffer size: {}".format(
                     rollout_steps, self.real_buffer.size, self.replay_buffer.size
