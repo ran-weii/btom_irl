@@ -12,7 +12,7 @@ import torch.distributions.transforms as torch_transform
 from src.agents.nn_models import MLP
 from src.agents.critic import DoubleQNetwork, compute_critic_loss
 from src.agents.buffer import ReplayBuffer
-from src.utils.evaluate import evaluate
+from src.utils.evaluation import evaluate_episodes
 from src.utils.logger import Logger
 
 class TanhTransform(torch_transform.Transform):
@@ -296,7 +296,7 @@ class SAC(nn.Module):
 
                 # evaluate episodes
                 if num_eval_eps > 0:
-                    evaluate(eval_env, self, num_eval_eps, eval_steps, eval_deterministic, logger)
+                    evaluate_episodes(eval_env, self, num_eval_eps, eval_steps, eval_deterministic, logger)
 
                 logger.push({"epoch": epoch + 1})
                 logger.push({"time": time.time() - start_time})

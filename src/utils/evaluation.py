@@ -31,7 +31,7 @@ def rollout(env, agent, max_steps, sample_mean=False):
     data["done"] = torch.from_numpy(np.stack(data["done"])).to(torch.float32)
     return data
 
-def evaluate(eval_env, agent, num_eval_eps, max_steps, eval_deterministic=True, logger=None):
+def evaluate_episodes(eval_env, agent, num_eval_eps, max_steps, eval_deterministic=True, logger=None):
     eval_eps = []
     eval_returns = []
     eval_lens = []
@@ -51,3 +51,18 @@ def evaluate(eval_env, agent, num_eval_eps, max_steps, eval_deterministic=True, 
         logger.push({"eval_eps_len_max": np.max(eval_lens)})
         logger.push({"eval_eps_len_min": np.min(eval_lens)})
     return eval_eps, eval_returns, eval_lens
+
+def evaluate_policy(batch, policy, logger=None):
+    """ Evaluate policy likelihood and mae """
+    obs = batch["obs"].to(policy.device)
+    act = batch["act"].to(policy.device)
+    
+    with torch.no_grad():
+        log_pi = policy.compute_action_likelihood(obs, act).mean()
+        mu, _ = policy.sample_action(obs, sample_mean=True)
+        mae = torch.abs(mu - act).mean()
+
+    if logger is not None:
+        logger.push({"log_pi": log_pi.cpu().data.item()})
+        logger.push({"pi_mae": mae.cpu().data.item()})
+    return log_pi, mae

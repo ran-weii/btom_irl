@@ -6,7 +6,7 @@ import torch
 from src.agents.sac import SAC
 from src.agents.dynamics import train_ensemble
 from src.agents.buffer import ReplayBuffer
-from src.utils.evaluate import evaluate
+from src.utils.evaluation import evaluate_episodes
 from src.utils.logger import Logger
 
 def compute_linear_scale(min_val, max_val, min_step, max_step, t):
@@ -336,7 +336,7 @@ class MBPO(SAC):
 
                 # evaluate episodes
                 if num_eval_eps > 0:
-                    evaluate(eval_env, self, num_eval_eps, eval_steps, eval_deterministic, logger)
+                    evaluate_episodes(eval_env, self, num_eval_eps, eval_steps, eval_deterministic, logger)
 
                 logger.push({"epoch": epoch + 1})
                 logger.push({"time": time.time() - start_time})
