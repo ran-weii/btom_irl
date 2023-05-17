@@ -263,11 +263,12 @@ class EpisodeReplayBuffer:
         )
         return {k: torch.from_numpy(v).to(torch.float32) for k, v in batch.items()}
     
-    def sample_episodes(self, batch_size, prioritize=False, ratio=2):
-        """ Sample complete episodes with zero sequence padding 
+    def sample_episode_segments(self, batch_size, seq_len=1000, prioritize=False, ratio=2):
+        """ Sample episode segments with zero sequence padding 
 
         Args:
             batch_size (int): sample batch size.
+            seq_len (int, optional): sequence length. Default=1000
             prioritize (bool, optional): whether to perform prioritized sampling. Default=False
             ratio (int, optional): prioritization ratio. 
                 Sample from the latest batch_size * ratio episodes. Deafult=100
@@ -276,8 +277,9 @@ class EpisodeReplayBuffer:
             max_samples = min(self.num_eps, batch_size * ratio)
             idx = np.random.choice(np.arange(max_samples), min(batch_size, max_samples), replace=False)
         else:
-            idx = np.random.choice(np.arange(self.num_eps), min(batch_size, self.num_eps), replace=False)
-        
+            # idx = np.random.choice(np.arange(self.num_eps), min(batch_size, self.num_eps), replace=False)
+            idx = np.random.randint(0, self.num_eps, batch_size)
+
         batch = []
         for i in idx:
             obs = torch.from_numpy(self.obs[i]).to(torch.float32)
@@ -286,12 +288,14 @@ class EpisodeReplayBuffer:
             next_obs = torch.from_numpy(self.next_obs[i]).to(torch.float32)
             done = torch.from_numpy(self.done[i]).to(torch.float32)
             
+            t = np.random.randint(0, len(obs) - seq_len)
+
             batch.append({
-                "obs": obs, 
-                "act": act, 
-                "rwd": rwd, 
-                "next_obs": next_obs,
-                "done": done,
+                "obs": obs[t:t+seq_len], 
+                "act": act[t:t+seq_len], 
+                "rwd": rwd[t:t+seq_len], 
+                "next_obs": next_obs[t:t+seq_len],
+                "done": done[t:t+seq_len],
             })
         
         out = collate_fn(batch)
