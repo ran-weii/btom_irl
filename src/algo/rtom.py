@@ -12,6 +12,7 @@ from src.utils.evaluation import evaluate_episodes, evaluate_policy
 from src.utils.logger import Logger
 
 class RTOM(RAMBO):
+    """ Robust theory of mind """
     def __init__(
         self, 
         reward,

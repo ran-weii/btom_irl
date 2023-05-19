@@ -126,7 +126,7 @@ def parse_args():
 def main(arglist):
     np.random.seed(arglist["seed"])
     torch.manual_seed(arglist["seed"])
-    print(f"training rail with settings: {arglist}")
+    print(f"training {arglist['algo']} with settings: {arglist}")
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"device: {device}")
@@ -153,7 +153,6 @@ def main(arglist):
         obs_variance=obs_std**2
     )
     
-    # init model
     reward = Reward(
         obs_dim,
         act_dim,

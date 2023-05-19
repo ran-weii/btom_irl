@@ -133,5 +133,5 @@ class Reward(nn.Module):
         for layer in self.mlp.layers:
             if hasattr(layer, "weight"):
                 loss += torch.sum(layer.weight ** 2) / 2.
-                # loss += torch.sum(layer.bias ** 2) / 2.
+                loss += torch.sum(layer.bias ** 2) / 2.
         return loss
