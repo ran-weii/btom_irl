@@ -1,0 +1,66 @@
+algo: mopo
+exp_path: ../../exp/mujoco/rl
+data_path: ../../data/d4rl
+cp_path: none
+
+# data args
+num_samples: 2000000
+norm_obs: True
+norm_rwd: False
+
+# dynamics args
+ensemble_dim: 7
+topk: 5
+m_hidden_dim: 200
+m_num_hidden: 3
+m_activation: silu
+residual: True
+min_std: 0.04
+max_std: 1.6
+m_decay: [0.000025, 0.00005, 0.000075, 0.000075, 0.0001]
+lam: 1.
+lam_target: 1.5
+tune_lam: True
+
+# policy args
+a_hidden_dim: 256
+a_num_hidden: 2
+a_activation: relu
+gamma: 0.99
+beta: 1.
+min_beta: 0.001
+polyak: 0.995
+tune_beta: True
+
+# training args
+buffer_size: 2000000
+batch_size: 256
+rollout_batch_size: 8000
+rollout_deterministic: False
+rollout_min_steps: 40
+rollout_max_steps: 40
+rollout_min_epoch: 50
+rollout_max_epoch: 200
+model_retain_epochs: 5
+real_ratio: 0.5
+eval_ratio: 0.2
+a_steps: 1
+lr_a: 3.e-4
+lr_c: 3.e-4
+lr_lam: 0.01
+grad_clip: 1000.
+
+# rollout args
+pretrain_steps: 0
+num_pretrain_samples: 100000
+epochs: 500
+steps_per_epoch: 1000
+sample_model_every: 250
+update_policy_every: 1
+num_eval_eps: 10
+eval_steps: 1000
+eval_deterministic: True
+cp_every: 10
+cp_intermediate: False
+verbose: 50
+render: False

@@ -1,0 +1,8 @@
+data_name: halfcheetah-medium-expert-v2
+env_name: "HalfCheetah-v2"
+dynamics_path: ../../exp/mujoco/dynamics/halfcheetah-medium-expert-v2/05-12-2023 18-51-01
+
+rollout_batch_size: 50000
+rollout_min_steps: 5
+rollout_max_steps: 5
+adv_rollout_steps: 5
