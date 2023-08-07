@@ -15,19 +15,19 @@ class GridworldVis:
                 v_map[j, i] = v[self.env.pos2state(np.array([i, j]))]
         return v_map
     
-    def plot_value_map(self, v, ax, annot=True, cbar=False, cmap=None):
+    def plot_value_map(self, v, ax, annot=True, cbar=False, cmap=None, **kwargs):
         v_map = self.value2map(v)
-        sns.heatmap(v_map, fmt=".2f", annot=annot, cbar=cbar, cmap=cmap, ax=ax)
+        sns.heatmap(v_map, fmt=".2f", annot=annot, cbar=cbar, cmap=cmap, linewidths=1, linecolor="black", ax=ax, **kwargs)
         ax.invert_yaxis()
         return ax
 
-    def plot_sample_path(self, s_seq, ax):
+    def plot_sample_path(self, s_seq, ax, eps=0.1):
         """
         Args:
             s_seq (np.array): batch of state sequences. size=[batch_size, T]
         """
         sample_path = np.stack([self.env.state2pos[d] for d in s_seq]).astype(float)
-        sample_path += np.random.normal(size=sample_path.shape) * 0.1
+        sample_path += np.random.normal(size=sample_path.shape) * eps
 
         ax.plot(sample_path[:, :, 0].T, sample_path[:, :, 1].T, "k-")
         ax.plot(sample_path[:, 0, 0], sample_path[:, 0, 1], "ro", label="Start")
@@ -57,7 +57,7 @@ if __name__ == "__main__":
     vis = GridworldVis(env)
 
     data_path = "../../data/gridworld"
-    with open(os.path.join(data_path, "data.p"), "rb") as f:
+    with open(os.path.join(data_path, "data_one_state_one_goal.p"), "rb") as f:
         data = pickle.load(f)
     
     fig, ax = plt.subplots(1, 1, figsize=(4, 4))
