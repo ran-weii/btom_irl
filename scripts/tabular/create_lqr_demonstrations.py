@@ -6,8 +6,8 @@ import numpy as np
 import torch
 
 from src.env.lqr import LQR
-from src.agents.lqr_agent import LQRAgent
-from src.algo.utils import rollout_parallel
+from src.tabular.lqr_agent import LQRAgent
+from src.tabular.utils import rollout_parallel
 
 def parse_args():
     bool_ = lambda x: x if isinstance(x, bool) else x == "True"
